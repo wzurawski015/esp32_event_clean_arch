@@ -29,7 +29,7 @@ config APP_LCD_ADDR
     default 0x3E
 config APP_RGB_ADDR
     hex "Adres RGB (7-bit)"
-    default 0x62
+    default 0x60
 config APP_LCD_TEXT0
     string "Wiersz 0"
     default "ESP32 Event LCD"

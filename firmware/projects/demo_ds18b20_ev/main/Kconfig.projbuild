@@ -1,0 +1,18 @@
+menu "App configuration"
+
+config APP_DS_GPIO
+    int "GPIO DS18B20 (DQ)"
+    range 0 48
+    default 18
+config APP_DS_RES
+    int "Rozdzielczość (9..12 bit)"
+    range 9 12
+    default 12
+config APP_DS_PERIOD_MS
+    int "Okres pomiarów [ms]"
+    default 2000
+config APP_DS_INT_PULLUP
+    bool "Wewnętrzny pull-up (zalecany i tak zewnętrzny 4.7k)"
+    default y
+
+endmenu

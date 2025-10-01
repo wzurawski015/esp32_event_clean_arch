@@ -17,7 +17,7 @@ config APP_I2C_SCL
     default 35 if IDF_TARGET_ESP32S2
 config APP_I2C_HZ
     int "I2C Hz"
-    default 400000
+    default 100000
 config APP_I2C_PULLUP
     bool "Włącz wewnętrzny pull-up I2C (zalecane i tak zewnętrzne 4.7k)"
     default y
@@ -29,7 +29,7 @@ config APP_LCD_ADDR
     default 0x3E
 config APP_RGB_ADDR
     hex "Adres RGB (7-bit)"
-    default 0x2D
+    default 0x62
 config APP_LCD_TEXT0
     string "Wiersz 0"
     default "ESP32 Event LCD"

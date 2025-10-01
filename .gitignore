@@ -1,55 +1,79 @@
-# Prerequisites
+# --- Ogólne śmieci systemowe/edytory ---
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+/.cache/
+.ccls-cache/
+.clangd/
+.vscode/
+.idea/
+*.iml
+*.code-workspace
+
+# --- Python (skrypty pomocnicze) ---
+venv/
+.venv/
+env/
+__pycache__/
+*.pyc
+
+# --- ESP-IDF / CMake: artefakty budowania (gdziekolwiek) ---
+**/build/
+**/CMakeFiles/
+**/CMakeCache.txt
+**/cmake_install.cmake
+**/Makefile
+**/rules.ninja
+**/.ninja_deps
+**/.ninja_log
+**/compile_commands.json
+
+# Obiekty/archiwa/biblioteki
+**/*.o
+**/*.obj
+**/*.a
+**/*.so
+**/*.dll
+**/*.dylib
+
+# Obrazy i mapy aplikacji
+**/*.bin
+**/*.elf
+**/*.map
+**/*.hex
+**/*.srec
+
+# Pliki generowane przez esptool/IDF
+**/flasher_args.json
+**/flash_project_args
+**/flash_args
+**/flash_app_args
+**/flash_bootloader_args
+**/partition-table-flash_args
+**/app-flash_args
+**/bootloader-flash_args
+**/bootloader-prefix/
+**/gdbinit/
+**/config.env
+**/project_description.json
+**/ldgen_libraries
+**/ldgen_libraries.in
+
+# Skonfigurowane SDK (utrzymuj tylko sdkconfig.defaults w repo)
+firmware/projects/**/sdkconfig
+firmware/projects/**/sdkconfig.old
+firmware/projects/**/sdkconfig.*.bak
+
+# Wygenerowane bundlowanie certów (czasem ląduje poza build/)
+**/x509_crt_bundle.S
+
+# --- Doxygen (generowane) ---
+docs/html/
+docs/latex/
+docs/xml/
+
+# --- Inne tymczasowe ---
 *.d
-
-# Object files
-*.o
-*.ko
-*.obj
-*.elf
-
-# Linker output
-*.ilk
-*.map
-*.exp
-
-# Precompiled Headers
-*.gch
-*.pch
-
-# Libraries
-*.lib
-*.a
-*.la
-*.lo
-
-# Shared objects (inc. Windows DLLs)
-*.dll
-*.so
-*.so.*
-*.dylib
-
-# Executables
-*.exe
-*.out
-*.app
-*.i*86
-*.x86_64
-*.hex
-
-# Debug files
-*.dSYM/
-*.su
-*.idb
-*.pdb
-
-# Kernel Module Compile Results
-*.mod*
-*.cmd
-.tmp_versions/
-modules.order
-Module.symvers
-Mkfile.old
-dkms.conf
-
-# debug information files
 *.dwo

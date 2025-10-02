@@ -88,6 +88,7 @@ esp_err_t i2c_dev_add(i2c_bus_t* bus, uint8_t addr7, i2c_dev_t** out_dev)
         free(dev);
         return err;
     }
+    ESP_LOGI(TAG, "device added @ 0x%02X, %u Hz", addr7, (unsigned)bus->clk_hz);
 
     *out_dev = dev;
     return ESP_OK;

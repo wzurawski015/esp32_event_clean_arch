@@ -37,8 +37,6 @@
 
 static const char* TAG = "DFR_LCD";
 
-#define LCD_ADDR 0x3E
-#define RGB_ADDR 0x2D
 
 /* Kontrolny bajt ST7032: 0x00=command, 0x40=data */
 #define LCD_CTL_CMD  0x00

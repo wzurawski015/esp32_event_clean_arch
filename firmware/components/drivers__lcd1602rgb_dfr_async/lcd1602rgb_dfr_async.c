@@ -161,8 +161,9 @@ static bool lcd_init_next_step(uint8_t *out_delay_ms, bool *out_finished) {
     */
     const uint8_t c_lo = (uint8_t)(CONFIG_APP_LCD_CONTR_LOW & 0x0F);
     const uint8_t c_hi = (uint8_t)(CONFIG_APP_LCD_CONTR_HIGH & 0x03);
-    const uint8_t contr_high_cmd = (uint8_t)(0x58 | (c_hi << 2) | 0x03); // ICON=1, BOOST=1
-
+    // ICON=1, BOOST=1, C[5:4] w bitach [1:0] – ST7032: 0x5C..0x5F
+    const uint8_t contr_high_cmd = (uint8_t)(0x5C | (c_hi & 0x03));
+    
     switch (idx) {
         case 0:  if (!lcd_cmd(0x38)) return false; *out_delay_ms = CONFIG_APP_LCD_INIT_FIRST_DELAY_MS; idx++; return true;
         case 1:  if (!lcd_cmd(0x39)) return false; *out_delay_ms = 2;   idx++; return true;

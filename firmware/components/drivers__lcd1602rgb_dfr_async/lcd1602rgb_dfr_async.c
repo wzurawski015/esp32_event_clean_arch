@@ -2,12 +2,10 @@
  * @file lcd1602rgb_dfr_async.c
  * @brief Sterownik DFRobot LCD1602 RGB (DFR0464 v2.0) – nieblokujący, event-driven.
  *
- *  - Kontroler LCD ST7032 (I2C: 0x3E),
- *  - Kontroler RGB (PCA9633-kompat., I2C: 0x2D lub 0x62 zależnie od wersji),
- *  - Wszystkie operacje I2C idą przez services__i2c (EV_I2C_DONE),
- *  - Opóźnienia realizowane esp_timer one-shot (brak vTaskDelay),
- *  - Po EV_LCD_READY robimy jednorazowy „flush test” (HELLO + biały RGB),
- *    by łatwo ocenić czy kontrast/inicjalizacja są poprawne.
+ *  - LCD: ST7032/AIP31068 @ 0x3E
+ *  - RGB: PCA9633-compatible (adres ustawia aplikacja; patrz Kconfig: CONFIG_APP_RGB_ADDR)
+ *  - Init dostrojony pod 3.3 V (ICON=1, BOOST=1, kontrast przez Kconfig, wydłużony pierwszy delay)
+ *  - Wysyłka DDRAM w paczkach (Kconfig: APP_LCD_BURST_SIZE) z konfigurowalną pauzą między paczkami
  *
  * @dot
  * digraph LCD {
@@ -38,36 +36,48 @@
 
 static const char* TAG = "DFR_LCD";
 
-/* Bajt kontrolny ST7032: 0x00=command, 0x40=data */
-#define LCD_CTL_CMD  0x00
-#define LCD_CTL_DATA 0x40
+/* --- Fallbacki Kconfig (jeśli ktoś zbuduje bez sdkconfig) --- */
+#ifndef CONFIG_APP_LCD_CONTR_LOW
+#define CONFIG_APP_LCD_CONTR_LOW 12
+#endif
+#ifndef CONFIG_APP_LCD_CONTR_HIGH
+#define CONFIG_APP_LCD_CONTR_HIGH 1
+#endif
+#ifndef CONFIG_APP_LCD_INIT_FIRST_DELAY_MS
+#define CONFIG_APP_LCD_INIT_FIRST_DELAY_MS 40
+#endif
+#ifndef CONFIG_APP_LCD_BURST_SIZE
+#define CONFIG_APP_LCD_BURST_SIZE 8
+#endif
+#ifndef CONFIG_APP_LCD_INTERCHUNK_DELAY_MS
+#define CONFIG_APP_LCD_INTERCHUNK_DELAY_MS 1
+#endif
+
+/* Kontrolny bajt ST7032: 0x00=command, 0x40=data */
+#define LCD_CTL_CMD   0x00
+#define LCD_CTL_DATA  0x40
 
 /* Rozmiar ekranu */
 #define LCD_COLS 16
 #define LCD_ROWS 2
 
-/* Opcjonalna parametryzacja kontrastu z Kconfig (jeśli brak – domyślne bezpieczne) */
-#ifndef CONFIG_APP_LCD_CONTR_LOW
-#define CONFIG_APP_LCD_CONTR_LOW  12   /* C3..C0 ≈ 0x0C – typowo dobre na 3V3 */
-#endif
-#ifndef CONFIG_APP_LCD_CONTR_HIGH
-#define CONFIG_APP_LCD_CONTR_HIGH 3    /* C5..C4 = 3 (max), zawsze z ICON=1, BOOST=1 */
-#endif
+/* Rozmiar paczki DDRAM sterowany Kconfig */
+#undef  LCD_BURST
+#define LCD_BURST ((CONFIG_APP_LCD_BURST_SIZE) < 1 ? 1 : (CONFIG_APP_LCD_BURST_SIZE))
 
 /* Ramka 2x16 znaków ASCII. */
 static char s_fb[LCD_ROWS][LCD_COLS];
 static bool s_dirty = false;
 
-/* I2C devices (dostarczane z zewnątrz) */
+/* Urządzenia I2C (przychodzą z warstwy aplikacji) */
 static i2c_dev_t* s_dev_lcd = NULL;
 static i2c_dev_t* s_dev_rgb = NULL;
 
-/* Kolejka zdarzeń sterownika */
+/* Kolejka eventów sterownika + one-shot do opóźnień */
 static ev_queue_t s_q;
-/* One-shot opóźnienia (bez vTaskDelay) */
 static esp_timer_handle_t s_delay = NULL;
 
-/* Prosty automat sterujący */
+/* Automat stanów */
 typedef enum {
     ST_IDLE = 0,
     ST_RGB_INIT,
@@ -78,16 +88,14 @@ typedef enum {
 } state_t;
 
 static state_t s_st = ST_IDLE;
-static uint8_t s_row = 0; /* postęp flushu */
-static uint8_t s_col = 0;
-
-/* Jednorazowy „HELLO” po EV_LCD_READY – tylko diagnostyka */
-static bool s_diag_done = false;
+static uint8_t s_row = 0;          /* aktualny wiersz do flush */
+static uint8_t s_col = 0;          /* kolumna startu (0) */
+static uint8_t s_sent_in_row = 0;  /* ile znaków wysłaliśmy w bieżącym wierszu */
 
 /* forward */
 static void step(void);
 
-/* Submit TX na I2C przez serwis */
+/* prosty helper do submitu I2C (TX) */
 static bool i2c_tx_now(i2c_dev_t* d, const uint8_t* data, size_t len) {
     i2c_req_t r = {
         .op = I2C_OP_TX, .dev = d, .tx = data, .txlen = len,
@@ -104,7 +112,7 @@ static void after_delay_cb(void* arg) {
 static void delay_ms(uint32_t ms) {
     if (!s_delay) {
         const esp_timer_create_args_t a = { .callback = after_delay_cb, .name = "lcd_delay" };
-        esp_err_t e = esp_timer_create(&a, &s_delay); (void)e;
+        (void)esp_timer_create(&a, &s_delay);
     }
     esp_timer_stop(s_delay);
     esp_timer_start_once(s_delay, (uint64_t)ms * 1000ULL);
@@ -115,32 +123,36 @@ static bool lcd_cmd(uint8_t cmd) {
     uint8_t buf[2] = { LCD_CTL_CMD, cmd };
     return i2c_tx_now(s_dev_lcd, buf, 2);
 }
-static bool lcd_data(const uint8_t* d, size_t n) {
-    if (n > LCD_COLS) n = LCD_COLS;
-    uint8_t tmp[1 + LCD_COLS];
+
+/* Wyślij paczkę danych (max LCD_BURST) – jedna transakcja I2C */
+static bool lcd_data_chunk(const uint8_t* d, size_t n) {
+    if (n > LCD_BURST) n = LCD_BURST;
+    uint8_t tmp[1 + LCD_BURST];
     tmp[0] = LCD_CTL_DATA;
     memcpy(&tmp[1], d, n);
     return i2c_tx_now(s_dev_lcd, tmp, 1 + n);
 }
+
+/* ustaw adres DDRAM (bit 7=1) */
 static bool lcd_set_ddram(uint8_t addr) {
     return lcd_cmd(0x80 | (addr & 0x7F));
 }
 
 /* --- Kontroler RGB (PCA9633-kompatybilny) --- */
+/* UWAGA: adres urządzenia RGB ma być ustawiony w aplikacji (i2c_dev_add(..., CONFIG_APP_RGB_ADDR)) */
 static bool rgb_init_sequence(void) {
-    /* MODE1=0x00, MODE2=0x05, LEDOUT=0xAA (kanały w trybie PWM) */
-    const uint8_t seq1[] = { 0x00, 0x00 };
-    const uint8_t seq2[] = { 0x01, 0x05 };
-    const uint8_t seq3[] = { 0x08, 0xAA };
+    const uint8_t seq1[] = { 0x00, 0x00 };  // MODE1
+    const uint8_t seq2[] = { 0x01, 0x05 };  // MODE2
+    const uint8_t seq3[] = { 0x08, 0xAA };  // LEDOUT
     return i2c_tx_now(s_dev_rgb, seq1, sizeof(seq1))
         && i2c_tx_now(s_dev_rgb, seq2, sizeof(seq2))
         && i2c_tx_now(s_dev_rgb, seq3, sizeof(seq3));
 }
 static void rgb_set(uint8_t r, uint8_t g, uint8_t b) {
     uint8_t wr[2];
-    wr[0] = 0x04; wr[1] = r; i2c_tx_now(s_dev_rgb, wr, 2); /* RED   */
-    wr[0] = 0x03; wr[1] = g; i2c_tx_now(s_dev_rgb, wr, 2); /* GREEN */
-    wr[0] = 0x02; wr[1] = b; i2c_tx_now(s_dev_rgb, wr, 2); /* BLUE  */
+    wr[0] = 0x04; wr[1] = r; (void)i2c_tx_now(s_dev_rgb, wr, 2); /* RED   */
+    wr[0] = 0x03; wr[1] = g; (void)i2c_tx_now(s_dev_rgb, wr, 2); /* GREEN */
+    wr[0] = 0x02; wr[1] = b; (void)i2c_tx_now(s_dev_rgb, wr, 2); /* BLUE  */
 }
 
 /* --- Sekwencja inicjalizacji ST7032 dla 3.3V (DFR0464 v2.0) --- */
@@ -149,37 +161,89 @@ static bool lcd_init_next_step(uint8_t *out_delay_ms, bool *out_finished) {
     *out_delay_ms = 0;
     *out_finished = false;
 
-    /* Notacja:
-       - 0x38 : Function set (IS=0, 8-bit, 2-line)
-       - 0x39 : Function set (IS=1, extended instruction)
-       - 0x14 : Internal OSC frequency (typowo OK)
-       - 0x70|N : Contrast low bits (C3..C0) – N≈0x0C daje zwykle dobry start
-       - 0x5F : ICON=1, BOOST=1, Contrast high bits (C5..C4)=11 (max)
-       - 0x6C : Follower control ON, potem dłuuugi delay (≥200ms)
+    /* Konfiguracja z Kconfig */
+    const uint8_t c_lo = (uint8_t)(CONFIG_APP_LCD_CONTR_LOW & 0x0F);   /* C[3:0] */
+    const uint8_t c_hi = (uint8_t)(CONFIG_APP_LCD_CONTR_HIGH & 0x03);  /* C[5:4] */
+    const uint8_t contr_high_cmd = (uint8_t)(0x58 | (c_hi << 2) | 0x03); // ICON=1, BOOST=1
+
+    /* Notacja (IS=instr set):
+       - 0x38 : Function set (IS=0, 2-line)
+       - 0x39 : Function set (IS=1)
+       - 0x14 : Internal OSC freq
+       - 0x70|C[3:0] : Contrast low (Kconfig)
+       - 0x58|C[5:4]|0x03 : ICON=1, BOOST=1, Contrast high (Kconfig)
+       - 0x6C : Follower ON (wymaga ~200ms dla stabilizacji V0)
        - 0x38 : IS=0
-       - 0x0C : Display ON (D=1,C=0,B=0)
-       - 0x01 : Clear display  (wymaga >1.6ms)
-       - 0x06 : Entry mode set (I/D=1, S=0)
+       - 0x0C : Display ON
+       - 0x01 : Clear (≥1.6ms)
+       - 0x06 : Entry mode (I/D=1, S=0)
     */
 
-    /* Pobierz ewentualne parametry z Kconfig (jeśli zdefiniowano) */
-    uint8_t c_lo = (uint8_t)(CONFIG_APP_LCD_CONTR_LOW  & 0x0F); /* 0..15  */
-    uint8_t c_hi = (uint8_t)(CONFIG_APP_LCD_CONTR_HIGH & 0x03); /* 0..3   */
-    /* 0x58 bazowe + (C5..C4)<<2 + 0x03 (ICON=1, BOOST=1) => 0x58|(c_hi<<2)|0x03 */
-    uint8_t contr_high_cmd = (uint8_t)(0x58 | (c_hi << 2) | 0x03);
-
     switch (idx) {
-        case 0:  if (!lcd_cmd(0x38))                 return false; *out_delay_ms = 2;   idx++; return true; // IS=0
-        case 1:  if (!lcd_cmd(0x39))                 return false; *out_delay_ms = 2;   idx++; return true; // IS=1
-        case 2:  if (!lcd_cmd(0x14))                 return false; *out_delay_ms = 2;   idx++; return true; // OSC
-        case 3:  if (!lcd_cmd(0x70 | c_lo))          return false; *out_delay_ms = 2;   idx++; return true; // contrast low
-        case 4:  if (!lcd_cmd(contr_high_cmd))       return false; *out_delay_ms = 2;   idx++; return true; // ICON=1 BOOST=1 C5..C4
-        case 5:  if (!lcd_cmd(0x6C))                 return false; *out_delay_ms = 200; idx++; return true; // follower ON (≥200ms)
-        case 6:  if (!lcd_cmd(0x38))                 return false; *out_delay_ms = 2;   idx++; return true; // IS=0
-        case 7:  if (!lcd_cmd(0x0C))                 return false; *out_delay_ms = 2;   idx++; return true; // display ON
-        case 8:  if (!lcd_cmd(0x01))                 return false; *out_delay_ms = 3;   idx++; return true; // clear (>1.6ms)
-        case 9:  if (!lcd_cmd(0x06))                 return false; *out_delay_ms = 2;   idx++; return true; // entry mode
-        default: idx = 0; *out_finished = true; return true;
+        case 0: {
+            if (!lcd_cmd(0x38)) return false;
+            *out_delay_ms = CONFIG_APP_LCD_INIT_FIRST_DELAY_MS;
+            idx++;
+            return true;
+        }
+        case 1: {
+            if (!lcd_cmd(0x39)) return false;
+            *out_delay_ms = 2;
+            idx++;
+            return true;
+        }
+        case 2: {
+            if (!lcd_cmd(0x14)) return false;
+            *out_delay_ms = 2;
+            idx++;
+            return true;
+        }
+        case 3: {
+            if (!lcd_cmd(0x70 | c_lo)) return false;
+            *out_delay_ms = 2;
+            idx++;
+            return true;
+        }
+        case 4: {
+            if (!lcd_cmd(contr_high_cmd)) return false;
+            *out_delay_ms = 2;
+            idx++;
+            return true;
+        }
+        case 5: {
+            if (!lcd_cmd(0x6C)) return false;
+            *out_delay_ms = 200;
+            idx++;
+            return true;
+        }
+        case 6: {
+            if (!lcd_cmd(0x38)) return false;
+            *out_delay_ms = 2;
+            idx++;
+            return true;
+        }
+        case 7: {
+            if (!lcd_cmd(0x0C)) return false;
+            *out_delay_ms = 2;
+            idx++;
+            return true;
+        }
+        case 8: {
+            if (!lcd_cmd(0x01)) return false;
+            *out_delay_ms = 3;
+            idx++;
+            return true;
+        }
+        case 9: {
+            if (!lcd_cmd(0x06)) return false;
+            *out_delay_ms = 2;
+            idx++;
+            return true;
+        }
+        default:
+            idx = 0;
+            *out_finished = true;
+            return true;
     }
 }
 
@@ -199,10 +263,12 @@ static void step(void) {
             break;
 
         case ST_LCD_INIT: {
-            uint8_t dly = 0; bool finished = false;
+            uint8_t dly = 0;
+            bool finished = false;
             bool submitted = lcd_init_next_step(&dly, &finished);
             if (!submitted) {
-                ESP_LOGW(TAG, "LCD init submit failed");
+                ESP_LOGW(TAG, "LCD init submit failed; retry");
+                delay_ms(2);
                 break;
             }
             if (finished) {
@@ -214,36 +280,56 @@ static void step(void) {
         } break;
 
         case ST_LCD_READY:
-            /* nic – czekamy na wywołanie flush() */
+            /* czekamy na flush() lub robimy test (obsłużone w task_ev po EV_LCD_READY) */
             break;
 
         case ST_LCD_FLUSH_POS: {
             const uint8_t addr = (s_row == 0 ? 0x00 : 0x40) + s_col;
+            s_sent_in_row = 0;
             if (lcd_set_ddram(addr)) {
                 s_st = ST_LCD_FLUSH_DATA;
+            } else {
+                ESP_LOGW(TAG, "set_ddram submit failed; retry");
+                delay_ms(1);
             }
         } break;
 
         case ST_LCD_FLUSH_DATA: {
+            /* Wyślij wiersz w paczkach */
             if (s_row < LCD_ROWS) {
-                if (s_col == 0) {
-                    if (lcd_data((const uint8_t*)s_fb[s_row], LCD_COLS)) {
+                size_t left = LCD_COLS - s_sent_in_row;
+                size_t chunk = (left > LCD_BURST) ? LCD_BURST : left;
+                if (lcd_data_chunk((const uint8_t*)&s_fb[s_row][s_sent_in_row], chunk)) {
+                    s_sent_in_row += chunk;
+
+                    if (s_sent_in_row >= LCD_COLS) {
+                        /* cały wiersz poszedł – następny */
                         s_row++;
+                        if (s_row >= LCD_ROWS) {
+                            s_st   = ST_IDLE;
+                            s_dirty = false;
+                            ev_post(EV_SRC_LCD, EV_LCD_UPDATED, 0, 0);
+                        } else {
+                            s_st = ST_LCD_FLUSH_POS; /* ustaw adres nowego wiersza */
+                        }
+                    } else {
+                        /* ► Pauza konfigurowalna między paczkami */
+                        if (CONFIG_APP_LCD_INTERCHUNK_DELAY_MS > 0) {
+                            delay_ms(CONFIG_APP_LCD_INTERCHUNK_DELAY_MS);
+                            break; // wrócisz tutaj na EV_LCD_UPDATED
+                        }
                     }
                 } else {
-                    s_row++;
-                }
-                if (s_row >= LCD_ROWS) {
-                    s_st   = ST_IDLE;
-                    s_dirty = false;
-                    ev_post(EV_SRC_LCD, EV_LCD_UPDATED, 0, 0);
+                    ESP_LOGW(TAG, "data_chunk submit failed; retry");
+                    delay_ms(1);
                 }
             } else {
                 s_st = ST_IDLE;
             }
         } break;
 
-        default: break;
+        default:
+            break;
     }
 }
 
@@ -259,22 +345,28 @@ static void task_ev(void* arg) {
                 step();
 
             } else if (m.src == EV_SRC_I2C && m.code == EV_I2C_DONE) {
-                /* Po każdym transferze I²C kontynuujemy następny krok */
-                step();
-
-            } else if (m.src == EV_SRC_LCD && m.code == EV_LCD_READY) {
-                /* --- DIAGNOSTYKA: wykonać raz po starcie --- */
-                if (!s_diag_done) {
-                    rgb_set(255, 255, 255);                /* max white */
-                    lcd1602rgb_draw_text(0, 0, "HELLO ST7032  ");
-                    lcd1602rgb_draw_text(0, 1, "DFR0464 v2.0  ");
-                    lcd1602rgb_request_flush();
-                    s_diag_done = true;
+                /* Rozróżnij sukces/błąd (a0 niesie esp_err_t) */
+                if ((esp_err_t)m.a0 != ESP_OK) {
+                    ESP_LOGW(TAG, "I2C op failed: 0x%x (state=%d)", (unsigned)m.a0, (int)s_st);
+                    delay_ms(2); /* łagodny retry */
+                } else {
+                    step();
                 }
 
-            } else if (m.src == EV_SRC_LCD && m.code == EV_LCD_UPDATED) {
-                /* sygnał z one-shot timera – kontynuuj */
+            } else if (m.src == EV_SRC_LCD && m.code == EV_LCD_READY) {
+                /* DIAGNOSTYKA: ustaw biały i wypchnij prosty test raz */
+                rgb_set(255, 255, 255);             // max white – żeby kontrast był widoczny
+                for (int r=0; r<LCD_ROWS; ++r) memset(s_fb[r], ' ', LCD_COLS);
+                const char *l0 = "HELLO ST7032   ";
+                const char *l1 = "DFR0464 v2.0   ";
+                memcpy(s_fb[0], l0, strlen(l0) > LCD_COLS ? LCD_COLS : strlen(l0));
+                memcpy(s_fb[1], l1, strlen(l1) > LCD_COLS ? LCD_COLS : strlen(l1));
+                s_dirty = true;
+                s_row = 0; s_col = 0; s_st = ST_LCD_FLUSH_POS;
                 step();
+
+            } else if (m.src == EV_SRC_LCD && m.code == EV_LCD_UPDATED) {
+                step(); /* kontynuacja po opóźnieniach one-shot */
             }
         }
     }
@@ -289,7 +381,6 @@ bool lcd1602rgb_init(const lcd1602rgb_cfg_t* cfg) {
 
     for (int r = 0; r < LCD_ROWS; ++r) memset(s_fb[r], ' ', LCD_COLS);
     s_dirty = false;
-    s_diag_done = false;
 
     if (!ev_subscribe(&s_q, 16)) return false;
 
@@ -320,7 +411,7 @@ void lcd1602rgb_request_flush(void) {
     if (!s_dirty) return;
     if (s_st != ST_IDLE && s_st != ST_LCD_READY) return;
 
-    s_row = 0; s_col = 0;
+    s_row = 0; s_col = 0; s_sent_in_row = 0;
     s_st  = ST_LCD_FLUSH_POS;
     step();
 }

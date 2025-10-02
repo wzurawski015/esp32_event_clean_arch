@@ -1,0 +1,50 @@
+menu "LCD1602RGB (DFRobot DFR0464) – ustawienia"
+
+config APP_LCD_CONTR_LOW
+    int "Kontrast: bity niskie (C[3:0])"
+    range 0 15
+    default 12
+    help
+      Dolne 4 bity kontrastu ST7032 (0..15).
+      Typowo 12 daje dobry start przy 3.3 V.
+
+config APP_LCD_CONTR_HIGH
+    int "Kontrast: bity wysokie (C[5:4])"
+    range 0 3
+    default 1
+    help
+      Górne 2 bity kontrastu ST7032 (0..3).
+      Dla 3.3 V sprawdza się 1 (0x5C). 3 (0x5F) bywa zbyt agresywne.
+
+config APP_LCD_INIT_FIRST_DELAY_MS
+    int "Delay po pierwszym Function Set (ms)"
+    range 0 200
+    default 40
+    help
+      Czas po 0x38 (IS=0) na ustabilizowanie kontrolera po power-on.
+      Zbyt mała wartość może dawać „krzaki”.
+
+config APP_LCD_BURST_SIZE
+    int "Rozmiar paczki DDRAM (B)"
+    range 1 16
+    default 8
+    help
+      Ile znaków wysyłać w jednej transakcji I2C do DDRAM.
+      8 jest bezpieczne dla wielu modułów.
+
+config APP_LCD_INTERCHUNK_DELAY_MS
+    int "Pauza pomiędzy paczkami DDRAM (ms)"
+    range 0 5
+    default 1
+    help
+      Krótka pauza (one-shot timer) między kolejnymi paczkami
+      pozwala kontrolerowi dogonić inkrementację DDRAM.
+
+config APP_RGB_ADDR
+    hex "Adres I2C kontrolera RGB"
+    default 0x62
+    help
+      Typowo 0x62 (PCA9633). Niektóre płytki używają 0x2D.
+      Ustaw właściwą wartość dla swojego egzemplarza.
+
+endmenu

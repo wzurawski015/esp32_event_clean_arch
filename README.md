@@ -1,84 +1,121 @@
 # ESP32 Event-Driven Clean Architecture (Multi-target)
 
-**Polski opis** poniżej — projekt jest przygotowany jako **ekstremalnie event‑driven** środowisko startowe
-dla rodziny ESP32 (ESP32, S2, S3, C3, C6, H2, P4). W repo znajdują się **3 projekty** przykładowe:
+Ekstremalnie **event-driven** szkielet dla rodziny ESP32 (ESP32, S2, S3, C3, C6, H2, P4), zaprojektowany w duchu **Clean Architecture**:
+- `components/core__ev` – event-bus (pub/sub, broadcast, oddzielne kolejki).
+- `components/ports` – czyste interfejsy (np. I²C).
+- `components/infrastructure__idf_i2c_port` – adapter nowego I²C (`driver/i2c_master.h`).
+- `components/services__i2c` – asynchroniczny worker I²C (publikuje `EV_I2C_DONE`).
+- `components/services__timer` – zegary `EV_TICK_100MS` i `EV_TICK_1S` (esp_timer).
+- `components/drivers__lcd1602rgb_dfr_async` – sterownik DFR0464 (ST7032 + PCA9633) jako automat stanów, zero blokad, **parametry przez Kconfig**.
+- `components/services__ds18b20_ev` – asynchroniczny DS18B20 (one-shoty, brak `vTaskDelay`).
 
-- `demo_hello_ev` – minimalny przykład: event bus + zegary (`EV_TICK_*`).
-- `demo_lcd_rgb` – sterownik **DFRobot LCD1602 RGB (DFR0464 v2.0)** po **nowym I²C** (`driver/i2c_master.h`),
-  w pełni **nieblokująco** przez usługę `services__i2c` (worker) i automat stanów.
-- `demo_ds18b20_ev` – **asynchroniczne** odczyty temperatury z **DS18B20** (single‑drop, 1‑Wire)
-  z użyciem **esp_timer** (bez `vTaskDelay` w logice wyższego poziomu).
+## Projekty przykładowe
 
-Wszystko jest zaprojektowane w duchu **Clean Architecture**:
-- `components/core__ev` – event‑bus (broadcast, wielu subskrybentów, każdy ma własną kolejkę).
-- `components/ports` – czyste interfejsy portów (np. I²C).
-- `components/infrastructure__idf_i2c_port` – adapter na **nowy sterownik I²C** (`driver/i2c_master.h`).
-- `components/services__i2c` – **asynchroniczny** worker kolejkujący operacje I²C → emituje `EV_I2C_DONE/ERROR`.
-- `components/services__timer` – zegary `EV_TICK_100MS` i `EV_TICK_1S` oparte o `esp_timer`.
-- `components/drivers__lcd1602rgb_dfr_async` – sterownik DFR0464 (0x3E LCD + 0x2D RGB), automat stanów, bez blokad.
-- `components/services__ds18b20_ev` – asynchroniczny serwis DS18B20 (1‑Wire, single‑drop) z zegarami `esp_timer`.
+- `demo_hello_ev` – minimalny event-loop + ticki.
+- `demo_lcd_rgb` – LCD1602 RGB (DFRobot DFR0464 v2.0) przez **services__i2c**.
+- `demo_ds18b20_ev` – DS18B20 (single drop, 1-Wire) sterowany timerami.
 
-## Szybki start
+## Szybki start (Docker)
 
-### 0) Docker
-Zbuduj obraz Dockera (IDF 5.3 + doxygen/graphviz) i przygotuj wolumeny narzędzi:
 ```bash
+# 0) Docker: obraz + wolumeny
 ./scripts/build-docker.sh
 ./scripts/init.sh
-```
 
-### 1) Wybór projektu i układu (target)
-```bash
-export PROJ=demo_lcd_rgb         # demo_hello_ev | demo_lcd_rgb | demo_ds18b20_ev
-export TARGET=esp32c6            # esp32 | esp32s2 | esp32s3 | esp32c3 | esp32c6 | esp32h2 | esp32p4
-```
+# 1) Wybór projektu i targetu
+export PROJ=demo_lcd_rgb
+export TARGET=esp32c6
 
-### 2) Budowanie
-```bash
-./scripts/build.sh
-```
-
-### 3) Programowanie + monitor
-```bash
-ESPPORT=$(./scripts/find-port.sh) ./scripts/flash-monitor.sh
-# lub: ESPPORT=/dev/ttyUSB0 ./scripts/flash-monitor.sh
-```
-
-### 4) Konfiguracja pinów i adresów (menuconfig)
-```bash
+# 2) Konfiguracja (menuconfig)
 ./scripts/menuconfig.sh
-# App configuration → I2C (LCD) → piny SDA/SCL, adresy LCD (0x3E) i RGB (0x2D)
-# demo_ds18b20_ev → DS18B20 GPIO i rozdzielczość (9..12 bit)
+# LCD1602RGB (DFRobot DFR0464) – ustawienia:
+#   Kontrast: C[3:0]           -> np. 12
+#   Kontrast: C[5:4]           -> np. 1
+#   Delay po 0x38 (ms)         -> np. 40
+#   Paczka DDRAM (B)           -> 8
+#   Pauza między paczkami (ms) -> 1
+#   Adres RGB                  -> 0x62 (lub 0x2D)
+
+# 3) Budowanie
+./scripts/build.sh
+
+# 4) Flash + monitor (Linux auto-port)
+ESPPORT=$(./scripts/find-port.sh) ./scripts/flash-monitor.sh
+```
+
+**Przydatne warianty:**
+
+```bash
+# pełne czyszczenie
+./scripts/idf.sh fullclean
+
+# ustawienie targetu (odbudowuje sdkconfig)
+./scripts/idf.sh set-target ${TARGET}
+
+# samo flashowanie
+ESPPORT=$(./scripts/find-port.sh) ./scripts/idf.sh -p ${ESPPORT} flash
+
+# sam monitor
+ESPPORT=$(./scripts/find-port.sh) ./scripts/monitor.sh
 ```
 
 ## Połączenia sprzętowe
 
-### DFRobot LCD1602 RGB (DFR0464 v2.0)
-- Zasilanie: **VCC=3.3V**, **GND**.
-- **I2C SDA/SCL** – domyślnie dla **ESP32‑C6**: **SDA=6**, **SCL=7** (zmienisz w `menuconfig`).
-- Adresy I²C: **LCD=0x3E**, **RGB=0x2D**.
+**DFRobot LCD1602 RGB (DFR0464 v2.0)**  
+Zasilanie: 3V3, GND.  
+I²C: SDA/SCL – domyślnie (dla C6) GPIO10/11 (zmienisz w *App configuration → I2C (LCD)*).  
+Adresy: LCD=0x3E, RGB=0x62 (czasem 0x2D – ustaw w Kconfig).
 
-### DS18B20 (single‑drop)
-- DQ do wybranego **GPIO** (domyślnie 18), **rezystor 4.7 kΩ** do 3V3 (zalecane).
-- Masa i zasilanie 3V3 (tryb zasilania normalnego; parasitic nieobsługiwany tu).
-- Konfiguracja w `menuconfig` projektu **demo_ds18b20_ev**.
+**DS18B20**  
+DQ → wybrany GPIO, rezystor 4.7 kΩ do 3V3, zasilanie 3V3, GND. Konfiguracja w `demo_ds18b20_ev`.
 
 ## Dokumentacja (Doxygen + Graphviz)
-Wygeneruj dokumentację (HTML) poleceniem:
+
 ```bash
 ./scripts/gen-docs.sh
-# Wygenerowane pliki: docs/html/index.html
+# Otwórz: docs/html/index.html
 ```
+
+## Uwagi architektoniczne
+
+- Całość jest sterowana zdarzeniami (event-bus + kolejki).
+- Brak `vTaskDelay` w logice (opóźnienia przez one-shot `esp_timer`).
+- Wzorcowe **ports & adapters**: kod wyższych warstw nie zależy od IDF (tylko od interfejsów).
+- Sterownik LCD w pełni reaktywny: init + flush w krokach, I²C przez serwis, pakiety DDRAM + opcjonalna pauza.
+
+## Typowe problemy i szybkie rozwiązania
+
+- **„Krzaki” na LCD po starcie:** zwiększ *Delay po 0x38*, ustaw `C[5:4]=1`, ustaw *Pauza między paczkami* = 1 ms, zmniejsz I²C (np. 50 kHz), sprawdź pull-upy 4.7 kΩ.
+- **RGB nie świeci:** sprawdź `APP_RGB_ADDR` (0x62 vs 0x2D).
 
 ---
 
-## Architektura (skrót)
-- **Event bus**: `ev_init()`, `ev_subscribe(&my_queue, len)`, `ev_post(src, code, a0, a1)`.
-  Każdy subskrybent ma kolejkę `QueueHandle_t`, do której trafia **każde** zdarzenie (broadcast).
-- **I²C**: Kierujemy wywołania przez **services__i2c** – logika (np. driver LCD) nie blokuje się;
-  operacje są wykonywane w dedykowanym workerze, a wynik przychodzi eventem.
-- **Zegary**: `EV_TICK_100MS`, `EV_TICK_1S` – żadnych `vTaskDelay` w logice aplikacji.
-- **DS18B20**: Cały cykl `convert -> opóźnienie -> read` realizowany przez **one‑shot esp_timer**
-  + automat stanów. Wątek aplikacji dostaje tylko eventy (`EV_DS18_READY`).
+# Jak używać — TL;DR komendy
 
-Szczegóły w komentarzach kodu (po polsku) i w dokumentacji Doxygen.
+```bash
+# wybierz target i projekt
+cd ~/esp32_event_clean_arch
+export TARGET=esp32c6
+export PROJ=demo_lcd_rgb
+
+# docker (jednorazowo / gdy zmieniałeś obraz)
+./scripts/build-docker.sh
+./scripts/init.sh
+
+# menuconfig (ustaw LCD1602RGB → kontrast/delay/burst/pauza/adres RGB)
+./scripts/menuconfig.sh
+
+# build
+./scripts/build.sh
+
+# flash + monitor
+ESPPORT=$(./scripts/find-port.sh) ./scripts/flash-monitor.sh
+```
+
+**Dlaczego to usuwa „krzaki”:**
+- kontrast stroisz bez rekompilacji (Kconfig),
+- pierwszy delay po 0x38 stabilizuje ST7032 po power-on,
+- paczki + pauza zapewniają poprawną inkrementację DDRAM,
+- adres RGB ustawiasz zgodnie z egzemplarzem (0x62 / 0x2D).
+
+Jeśli chcesz, mogę dorzucić wariant z auto-probe adresu RGB (0x62→0x2D fallback) – ale skoro preferujesz Kconfig, obecne rozwiązanie jest idealnie „czyste” i przewidywalne.

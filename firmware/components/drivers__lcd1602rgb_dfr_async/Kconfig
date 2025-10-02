@@ -1,38 +1,5 @@
-menu "LCD1602 (sterownik DFR0464) – parametry"
-
-config APP_LCD_CONTR_LOW
-    int "Kontrast: C[3:0]"
-    range 0 15
-    default 13
-    help
-      Niższe bity kontrastu (C3..C0). Dla 3.3V zwykle 12..15.
-
-config APP_LCD_CONTR_HIGH
-    int "Kontrast: C[5:4]"
-    range 0 3
-    default 3
-    help
-      Wyższe bity kontrastu (C5..C4). 3=MAX.
-
-config APP_LCD_INIT_FIRST_DELAY_MS
-    int "Delay po 0x38 (ms)"
-    range 0 200
-    default 40
-    help
-      Dodatkowa stabilizacja po pierwszym Function Set (IS=0).
-
-config APP_LCD_BURST_SIZE
-    int "Paczka DDRAM (znaki)"
-    range 1 16
-    default 8
-    help
-      Ile znaków wysyłać w jednej transakcji I2C (bez bajtu kontrolnego).
-
-config APP_LCD_INTERCHUNK_DELAY_MS
-    int "Pauza między paczkami (ms)"
-    range 0 20
-    default 1
-    help
-      Krótka przerwa między kolejnymi paczkami DDRAM. 0 = bez pauzy.
-
-endmenu
+# Ten komponent nie definiuje żadnych symboli Kconfig.
+# Wszystkie ustawienia przeniesiono do:
+#   firmware/projects/demo_lcd_rgb/main/Kconfig.projbuild
+#
+# Menu pozostawiamy puste, by uniknąć duplikatów i ostrzeżeń.

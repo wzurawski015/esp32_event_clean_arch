@@ -40,11 +40,4 @@ config APP_LCD_INTERCHUNK_DELAY_MS
       Krótka pauza (one-shot timer) między kolejnymi paczkami
       pozwala kontrolerowi dogonić inkrementację DDRAM.
 
-config APP_RGB_ADDR
-    hex "Adres I2C kontrolera RGB"
-    default 0x62
-    help
-      Typowo 0x62 (PCA9633). Niektóre płytki używają 0x2D.
-      Ustaw właściwą wartość dla swojego egzemplarza.
-
 endmenu

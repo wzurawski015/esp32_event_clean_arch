@@ -5,34 +5,26 @@
  *
  *  - Nie konfigurujemy GPIO ręcznie (robi to driver I²C),
  *  - Wewnętrzne podciągi przez pole flags.enable_internal_pullup,
- *  - Każde urządzenie ma ustawioną prędkość SCL (Hz),
- *  - DODANE: i2c_bus_probe_addr() do skanowania/wykrywania ACK.
+ *  - Każde urządzenie ma ustawioną prędkość SCL (Hz).
  */
-
-#include "idf_i2c_port.h"         // deklaracje typów z ports/i2c_port.h + prototypy do tego adaptera
-#include "ports/i2c_port.h"       // interfejs abstrakcyjny (i2c_bus_t, i2c_dev_t, i2c_bus_cfg_t)
+#include "idf_i2c_port.h"
+#include "ports/i2c_port.h"
 #include "driver/i2c_master.h"
-#include "esp_err.h"
 #include "esp_log.h"
-
+#include "esp_check.h"
 #include <stdlib.h>
 #include <string.h>
-#include <stdbool.h>
-#include <stdint.h>
 
-/* WŁAŚCIWE (prywatne) definicje struktur – odpowiadają forward-deklaracjom w ports/i2c_port.h */
-struct i2c_bus {
+typedef struct i2c_bus {
     i2c_master_bus_handle_t hbus;
     uint32_t                clk_hz;
-};
+} i2c_bus_t;
 
-struct i2c_dev {
+typedef struct i2c_dev {
     i2c_master_dev_handle_t hdev;
-};
+} i2c_dev_t;
 
 static const char* TAG = "I2C_PORT";
-
-/* ---------- BUS ---------- */
 
 esp_err_t i2c_bus_create(const i2c_bus_cfg_t* cfg, i2c_bus_t** out_bus)
 {
@@ -43,7 +35,7 @@ esp_err_t i2c_bus_create(const i2c_bus_cfg_t* cfg, i2c_bus_t** out_bus)
 
     i2c_master_bus_config_t bcfg = {
         .clk_source        = I2C_CLK_SRC_DEFAULT,
-        .i2c_port          = 0,  /* większość targetów używa portu 0; jeśli potrzebujesz 1 – przenieś do Kconfig */
+        .i2c_port          = 0,  /* większość targetów używa portu 0 */
         .sda_io_num        = cfg->sda_gpio,
         .scl_io_num        = cfg->scl_gpio,
         .glitch_ignore_cnt = 7,
@@ -51,16 +43,10 @@ esp_err_t i2c_bus_create(const i2c_bus_cfg_t* cfg, i2c_bus_t** out_bus)
     };
     bcfg.flags.enable_internal_pullup = cfg->enable_internal_pullup ? 1 : 0;
 
-    i2c_master_bus_handle_t hbus = NULL;
-    esp_err_t err = i2c_new_master_bus(&bcfg, &hbus);
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG, "i2c_new_master_bus() failed: %s", esp_err_to_name(err));
-        free(bus);
-        return err;
-    }
+    ESP_RETURN_ON_ERROR(i2c_new_master_bus(&bcfg, &bus->hbus),
+                        TAG, "i2c_new_master_bus failed");
 
-    bus->hbus   = hbus;
-    bus->clk_hz = (cfg->clk_hz != 0) ? cfg->clk_hz : 100000; /* domyślnie 100 kHz */
+    bus->clk_hz = cfg->clk_hz ? cfg->clk_hz : 100000;
 
     *out_bus = bus;
     ESP_LOGI(TAG, "I2C bus created SDA=%d SCL=%d, clk=%u Hz, pullup=%s",
@@ -76,35 +62,6 @@ esp_err_t i2c_bus_delete(i2c_bus_t* bus)
     free(bus);
     return err;
 }
-
-/**
- * @brief Szybkie „probe” adresu 7‑bit (ACK/NACK) – do skanowania magistrali.
- *
- * @param bus        uchwyt magistrali
- * @param addr7      adres urządzenia (7‑bit)
- * @param timeout_ms timeout operacji
- * @param out_ack    (opcjonalnie) wynik: true jeśli odpowiedział ACK
- *
- * @return ESP_OK (zwykle) – sprawdź out_ack; inny błąd gdy nie udało się wykonać próby.
- */
-esp_err_t i2c_bus_probe_addr(i2c_bus_t* bus, uint8_t addr7, uint32_t timeout_ms, bool* out_ack)
-{
-    if (!bus) return ESP_ERR_INVALID_ARG;
-    if (out_ack) *out_ack = false;
-
-    /* Nowy sterownik ma bezpośrednio API do probe'u po samym busie. */
-    esp_err_t err = i2c_master_probe(bus->hbus, addr7, timeout_ms);
-    if (err == ESP_OK) {
-        if (out_ack) *out_ack = true;
-        return ESP_OK;
-    }
-
-    /* Gdy urządzenie nie odpowiada, driver zwykle zwraca ESP_ERR_TIMEOUT lub ESP_ERR_NOT_FOUND.
-       Zachowujemy kod błędu, ale out_ack pozostaje false. */
-    return err;
-}
-
-/* ---------- DEVICE ---------- */
 
 esp_err_t i2c_dev_add(i2c_bus_t* bus, uint8_t addr7, i2c_dev_t** out_dev)
 {
@@ -139,8 +96,6 @@ esp_err_t i2c_dev_remove(i2c_dev_t* dev)
     return err;
 }
 
-/* ---------- TRANSFERY ---------- */
-
 esp_err_t i2c_tx(i2c_dev_t* dev, const uint8_t* tx, size_t txlen, uint32_t timeout_ms)
 {
     if (!dev || (txlen && !tx)) return ESP_ERR_INVALID_ARG;
@@ -160,4 +115,42 @@ esp_err_t i2c_txrx(i2c_dev_t* dev,
 {
     if (!dev) return ESP_ERR_INVALID_ARG;
     return i2c_master_transmit_receive(dev->hdev, tx, txlen, rx, rxlen, timeout_ms);
+}
+
+esp_err_t i2c_bus_probe_addr(i2c_bus_t* bus, uint8_t addr7,
+                             uint32_t timeout_ms, bool* out_ack)
+{
+    if (!bus) return ESP_ERR_INVALID_ARG;
+    if (out_ack) *out_ack = false;
+    if (addr7 < 0x03 || addr7 > 0x77) return ESP_ERR_INVALID_ARG;
+
+    /* i2c_master_probe jest częścią nowego API */
+    esp_err_t err = i2c_master_probe(bus->hbus, addr7, timeout_ms);
+    if (err == ESP_OK) {
+        if (out_ack) *out_ack = true;
+        return ESP_OK;
+    }
+    /* Brak ACK traktujemy jako „nie znaleziono”, ale bez błędu krytycznego */
+    if (err == ESP_ERR_TIMEOUT || err == ESP_FAIL) {
+        if (out_ack) *out_ack = false;
+        return ESP_OK;
+    }
+    return err; /* param/other */
+}
+
+esp_err_t i2c_bus_scan_range(i2c_bus_t* bus,
+                             uint8_t start, uint8_t end,
+                             uint32_t timeout_ms,
+                             uint8_t* out_found, size_t cap, size_t* out_n)
+{
+    if (!bus) return ESP_ERR_INVALID_ARG;
+    size_t n = 0;
+    for (uint8_t a = start; a <= end; ++a) {
+        bool ack = false;
+        esp_err_t e = i2c_bus_probe_addr(bus, a, timeout_ms, &ack);
+        if (e != ESP_OK) return e;
+        if (ack && out_found && n < cap) out_found[n++] = a;
+    }
+    if (out_n) *out_n = n;
+    return ESP_OK;
 }

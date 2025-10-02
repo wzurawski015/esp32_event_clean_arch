@@ -1,44 +1,38 @@
-# firmware/components/drivers__lcd1602rgb_dfr_async/Kconfig
-
-menu "LCD1602RGB (DFRobot DFR0464) – ustawienia drivera"
+menu "LCD1602 (sterownik DFR0464) – parametry"
 
 config APP_LCD_CONTR_LOW
-    int "Kontrast: C[3:0] (niska część, 0..15)"
+    int "Kontrast: C[3:0]"
     range 0 15
-    default 12
+    default 13
     help
-      Niski nibble kontrastu (C3..C0) kontrolera ST7032/AIP31068.
-      Przy zasilaniu 3.3 V zwykle sprawdza się 10–13.
+      Niższe bity kontrastu (C3..C0). Dla 3.3V zwykle 12..15.
 
 config APP_LCD_CONTR_HIGH
-    int "Kontrast: C[5:4] (wysoka część, 0..3)"
+    int "Kontrast: C[5:4]"
     range 0 3
     default 3
     help
-      Wysokie bity kontrastu (C5..C4). 3 = maksimum (zalecane dla 3.3 V).
-      Gdy znaki są mało widoczne, podbij tę wartość.
+      Wyższe bity kontrastu (C5..C4). 3=MAX.
 
 config APP_LCD_INIT_FIRST_DELAY_MS
-    int "Init: dodatkowa pauza po pierwszym 0x38 (ms)"
-    range 0 1000
+    int "Delay po 0x38 (ms)"
+    range 0 200
     default 40
     help
-      Dodatkowy czas stabilizacji po pierwszym Function Set.
-      20–50 ms bywa konieczne na niektórych egzemplarzach.
+      Dodatkowa stabilizacja po pierwszym Function Set (IS=0).
 
 config APP_LCD_BURST_SIZE
-    int "Wysyłka DDRAM: rozmiar paczki (1..32 bajty)"
-    range 1 32
+    int "Paczka DDRAM (znaki)"
+    range 1 16
     default 8
     help
-      Ile znaków (bez bajtu kontrolnego) wysyłać w jednym transferze I²C.
+      Ile znaków wysyłać w jednej transakcji I2C (bez bajtu kontrolnego).
 
 config APP_LCD_INTERCHUNK_DELAY_MS
-    int "Pauza między paczkami DDRAM (ms)"
+    int "Pauza między paczkami (ms)"
     range 0 20
     default 1
     help
-      0 = bez pauz. Krótkie opóźnienie 1 ms poprawia stabilność
-      u „wrażliwych” wyświetlaczy.
+      Krótka przerwa między kolejnymi paczkami DDRAM. 0 = bez pauzy.
 
 endmenu

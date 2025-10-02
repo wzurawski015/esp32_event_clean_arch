@@ -39,8 +39,8 @@ static const char* TAG = "DFR_LCD";
 #define CONFIG_APP_LCD_INTERCHUNK_DELAY_MS 1
 #endif
 
-/* Kontrolny bajt ST7032: 0x00=command, 0x40=data */
-#define LCD_CTL_CMD   0x00
+/* Kontrolny bajt ST7032: 0x80=command, 0x40=data */
+#define LCD_CTL_CMD   0x80
 #define LCD_CTL_DATA  0x40
 
 /* Rozmiar ekranu */

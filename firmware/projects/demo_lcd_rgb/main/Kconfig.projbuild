@@ -2,40 +2,105 @@ menu "App configuration"
 
 menu "I2C (LCD)"
 config APP_I2C_SDA
-    int "I2C SDA"
+    int "I2C SDA GPIO"
     range 0 48
     default 10 if IDF_TARGET_ESP32C6
     default 8  if IDF_TARGET_ESP32C3
     default 21 if IDF_TARGET_ESP32 || IDF_TARGET_ESP32S3
     default 33 if IDF_TARGET_ESP32S2
+    help
+      Numer GPIO dla linii SDA magistrali I2C.
+
 config APP_I2C_SCL
-    int "I2C SCL"
+    int "I2C SCL GPIO"
     range 0 48
     default 11 if IDF_TARGET_ESP32C6
     default 9  if IDF_TARGET_ESP32C3
     default 22 if IDF_TARGET_ESP32 || IDF_TARGET_ESP32S3
     default 35 if IDF_TARGET_ESP32S2
+    help
+      Numer GPIO dla linii SCL magistrali I2C.
+
 config APP_I2C_HZ
-    int "I2C Hz"
+    int "I2C częstotliwość (Hz)"
+    range 1000 1000000
     default 100000
+    help
+      Prędkość SCL. 100 kHz jest bezpiecznym domyślnym wyborem.
+
 config APP_I2C_PULLUP
-    bool "Włącz wewnętrzny pull-up I2C (zalecane i tak zewnętrzne 4.7k)"
+    bool "Włącz wewnętrzny pull-up I2C (zalecane i tak zewnętrzne ~4.7k)"
     default y
+    help
+      Driver I²C włączy wewnętrzne podciągi na SDA/SCL. Rekomendowane także
+      zewnętrzne rezystory 4.7 kΩ dla stabilności na dłuższych przewodach.
 endmenu
 
-menu "LCD DFR0464 (RGB)"
+menu "LCD1602RGB (DFRobot DFR0464 v2.0)"
+
 config APP_LCD_ADDR
-    hex "Adres LCD (7-bit)"
+    hex "Adres LCD (7-bit, ST7032)"
     default 0x3E
+    help
+      7‑bitowy adres kontrolera LCD ST7032/AIP31068 (zwykle 0x3E).
+
 config APP_RGB_ADDR
-    hex "Adres RGB (7-bit)"
-    default 0x2D      # DFR0464 v2.0 → KLUCZOWE
+    hex "Adres RGB (7-bit, PCA9633‑compatible)"
+    default 0x2D
+    help
+      7‑bitowy adres kontrolera podświetlenia (PCA9633‑compatible). DFR0464 v2.0
+      najczęściej ma 0x2D. Wartość traktowana jako fallback — jeśli aplikacja
+      skanuje I²C przy starcie i wykryje urządzenie, użyje wykrytego adresu.
+
 config APP_LCD_TEXT0
-    string "Wiersz 0"
+    string "Wiersz 0 (tekst startowy)"
     default "ESP32 Event LCD"
+
 config APP_LCD_TEXT1
-    string "Wiersz 1"
+    string "Wiersz 1 (tekst startowy)"
     default "RGB: 16x2 DFR0464"
+
+menu "Kontrast i czasowania LCD (opcjonalnie przez Kconfig)"
+config APP_LCD_CONTR_LOW
+    int "Kontrast C[3:0]"
+    range 0 15
+    default 12
+    help
+      Niski nibble kontrastu wysyłany komendą 0x70 | C[3:0].
+
+config APP_LCD_CONTR_HIGH
+    int "Kontrast C[5:4]"
+    range 0 3
+    default 1
+    help
+      Wysokie bity kontrastu (C[5:4]) osadzane w komendzie „ICON/BOOST/CONTR”.
+
+config APP_LCD_INIT_FIRST_DELAY_MS
+    int "Opóźnienie po 0x38 (ms)"
+    range 0 200
+    default 40
+    help
+      Czas na „dogrzanie” ST7032 zaraz po pierwszym 0x38 (IS=0). 20–50 ms pomaga
+      na trudniejszych egzemplarzach przy 3V3.
+
+config APP_LCD_BURST_SIZE
+    int "Paczka DDRAM (1..16 znaków)"
+    range 1 16
+    default 8
+    help
+      Maks. liczba bajtów danych (bez bajtu kontrolnego 0x40) w jednej transakcji
+      I²C podczas wysyłania DDRAM.
+
+config APP_LCD_INTERCHUNK_DELAY_MS
+    int "Pauza między paczkami (ms)"
+    range 0 10
+    default 1
+    help
+      Krótka pauza pomiędzy kolejnymi paczkami DDRAM (stabilność na „słabszych”
+      modułach/taśmach).
+endmenu  # Kontrast i czasowania
+
+menu "Podświetlenie RGB – kolor startowy"
 config APP_RGB_R
     int "R (0..255)"
     range 0 255
@@ -48,6 +113,8 @@ config APP_RGB_B
     int "B (0..255)"
     range 0 255
     default 64
-endmenu
+endmenu  # RGB
 
-endmenu
+endmenu  # LCD1602RGB
+
+endmenu  # App configuration

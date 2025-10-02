@@ -25,6 +25,8 @@ Ekstremalnie **event-driven** szkielet dla rodziny ESP32 (ESP32, S2, S3, C3, C6,
 # 1) Wybór projektu i targetu
 export PROJ=demo_lcd_rgb
 export TARGET=esp32c6
+# 1a)
+./scripts/idf.sh fullclean && ./scripts/build.sh && ESPPORT=$(./scripts/find-port.sh) ./scripts/flash-monitor.sh
 
 # 2) Konfiguracja (menuconfig)
 ./scripts/menuconfig.sh

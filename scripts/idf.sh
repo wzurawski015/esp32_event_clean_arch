@@ -11,28 +11,43 @@ if [[ ! -d "${FW}/projects/${PROJ}" ]]; then
   exit 2
 fi
 
-# Podłącz port - tylko jako urządzenie, argumenty -p przekażemy jawnie w poleceniach wywołujących
-PORT_DEV=""
+# Obraz Dockera: lokalny (np. esp32-idf:5.5.1) lub oficjalny (espressif/idf:v5.5.1)
+IMAGE="${IDF_IMAGE:-esp32-idf:5.5.1}"
+
+# Podłącz port - tylko jako urządzenie; -p przekażemy jawnie do idf.py
+PORT_DEV=()
 if [[ -n "${ESPPORT:-}" ]]; then
-  PORT_DEV="--device=${ESPPORT}:${ESPPORT}"
+  PORT_DEV=(--device="${ESPPORT}:${ESPPORT}")
 fi
 
-docker run --rm -it \
-  -e TERM=xterm-256color \
+# -it tylko jeśli mamy TTY (np. w CI brak TTY)
+TTY=()
+if [[ -t 1 ]]; then
+  TTY=(-it)
+fi
+
+docker run --rm "${TTY[@]}" \
+  -e TERM="${TERM:-xterm-256color}" \
+  -e COLUMNS="${COLUMNS:-120}" \
+  -e LINES="${LINES:-40}" \
   -e IDF_CCACHE_ENABLE=1 \
   -e IDF_TARGET="${TARGET}" \
+  -e PROJ="${PROJ}" \
+  -e TARGET="${TARGET}" \
   -v esp-idf-espressif:/root/.espressif \
   -v esp-idf-ccache:/root/.cache/ccache \
   -v "${FW}:/fw" \
-  ${PORT_DEV} \
-  esp32-idf:5.3-docs bash -lc "
+  "${PORT_DEV[@]}" \
+  "${IMAGE}" \
+  bash -lc '
     set -Eeuo pipefail
-    cd /fw/projects/${PROJ}
+    . "${IDF_PATH}/export.sh"
+    cd "/fw/projects/${PROJ}"
     # ustaw target tylko jeśli różni się od oczekiwanego
-    CUR=\$(grep -E '^CONFIG_IDF_TARGET=\"' sdkconfig 2>/dev/null | sed -E 's/.*\"(.*)\".*/\1/' || true)
-    if [[ \"\${CUR}\" != \"${TARGET}\" ]]; then
-      idf.py set-target ${TARGET}
+    CUR=$(grep -E "^CONFIG_IDF_TARGET=\"" sdkconfig 2>/dev/null | sed -E "s/.*\"(.+)\".*/\1/" || true)
+    if [[ "${CUR}" != "${TARGET}" ]]; then
+      idf.py set-target "${TARGET}"
     fi
     # wykonaj dokładnie to, co zostało przekazane do idf.sh
-    idf.py $*
-"
+    idf.py "$@"
+  ' -- "$@"

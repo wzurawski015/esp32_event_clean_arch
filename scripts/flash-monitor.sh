@@ -15,7 +15,7 @@ fi
 ESPBAUD="${ESPBAUD:-460800}"
 MONBAUD="${MONBAUD:-115200}"
 
-echo "Flash+Monitor: ${ESPPORT}  (Ctrl+] aby wyjść)"
+echo "Flash+Monitor: ${ESPPORT}  (Ctrl+] aby wyjść)  |  IMAGE=${IDF_IMAGE:-esp32-idf:5.5.1}"
 
 # Flash
 PROJ="${PROJ}" TARGET="${TARGET}" ESPPORT="${ESPPORT}" \

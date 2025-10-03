@@ -27,6 +27,7 @@ export PROJ=demo_lcd_rgb
 export TARGET=esp32c6
 # 1a)
 ./scripts/idf.sh fullclean && ./scripts/build.sh && ESPPORT=$(./scripts/find-port.sh) ./scripts/flash-monitor.sh
+./scripts/idf.sh fullclean && IDF_IMAGE=esp32-idf:5.5.1 ESPPORT=$(./scripts/find-port.sh) ./scripts/flash-monitor.sh
 
 # 2) Konfiguracja (menuconfig)
 ./scripts/menuconfig.sh
@@ -121,3 +122,36 @@ ESPPORT=$(./scripts/find-port.sh) ./scripts/flash-monitor.sh
 - adres RGB ustawiasz zgodnie z egzemplarzem (0x62 / 0x2D).
 
 Jeśli chcesz, mogę dorzucić wariant z auto-probe adresu RGB (0x62→0x2D fallback) – ale skoro preferujesz Kconfig, obecne rozwiązanie jest idealnie „czyste” i przewidywalne.
+
+---
+
+## Jak używać (wprost)
+
+> **Uwaga:** oficjalny tag obrazu Espressifa to `espressif/idf:v5.5.1` (z literą **v**).  
+> Jeśli budujesz własny obraz z Doxygen/Graphviz, używaj lokalnego tagu `esp32-idf:5.5.1`.
+
+```bash
+# 1) Budowa własnego obrazu z Doxygen/Graphviz (jeśli chcesz)
+docker build --pull -f Docker/Dockerfile.idf-5.5.1 -t esp32-idf:5.5.1 .
+
+# 2) Build na nowym IDF (lokalny obraz)
+IDF_IMAGE=esp32-idf:5.5.1 ./scripts/build.sh
+
+# 3) Flash + monitor (lokalny obraz)
+IDF_IMAGE=esp32-idf:5.5.1 ESPPORT=$(./scripts/find-port.sh) ./scripts/flash-monitor.sh
+
+# 4) Rollback do starego (bez zmian w źródłach)
+IDF_IMAGE=esp32-idf:5.3-docs ./scripts/build.sh
+
+# (alternatywa: oficjalny obraz Espressifa, bez własnego Dockerfile)
+IDF_IMAGE=espressif/idf:v5.5.1 ./scripts/build.sh
+```
+
+---
+
+### Szybki sanity-check po podmianie
+- `shellcheck scripts/idf.sh` → brak błędów.  
+- `IDF_IMAGE=espressif/idf:v5.5.1 ./scripts/build.sh` → powinno zbudować bez zmian w źródłach.  
+- `IDF_IMAGE=esp32-idf:5.5.1` (Twój lokalny obraz) działa identycznie; zmieniasz tylko zmienną środowiskową.  
+
+Gdybyś chciał, mogę przygotować jeszcze patch do `Docker/Dockerfile.idf-5.5.1` (z poprawnym `FROM espressif/idf:v5.5.1`) i krótki workflow GitHub Actions z matrixem IDF/targets.

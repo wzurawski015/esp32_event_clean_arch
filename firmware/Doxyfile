@@ -1,0 +1,18 @@
+PROJECT_NAME           = "ESP32 Event-Driven Clean Architecture"
+OUTPUT_DIRECTORY       = docs
+CREATE_SUBDIRS         = NO
+OPTIMIZE_OUTPUT_FOR_C  = YES
+EXTRACT_ALL            = YES
+INPUT                  = components projects
+FILE_PATTERNS          = *.c *.h *.md
+RECURSIVE              = YES
+QUIET                  = NO
+WARN_AS_ERROR          = YES
+
+# Graphviz
+HAVE_DOT               = YES
+DOT_TRANSPARENT        = YES
+CALL_GRAPH             = YES
+CALLER_GRAPH           = YES
+INCLUDE_GRAPH          = YES
+DOT_MULTI_TARGETS      = YES

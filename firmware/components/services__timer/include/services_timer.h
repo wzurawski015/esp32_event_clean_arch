@@ -6,14 +6,15 @@
 #include <stdbool.h>
 
 #ifdef __cplusplus
-extern "C" {
+extern "C"
+{
 #endif
 
-/** Inicjalizacja serwisu zegarów. */
-bool services_timer_start(void);
+    /** Inicjalizacja serwisu zegarów. */
+    bool services_timer_start(void);
 
-/** Zatrzymanie (opcjonalne). */
-void services_timer_stop(void);
+    /** Zatrzymanie (opcjonalne). */
+    void services_timer_stop(void);
 
 #ifdef __cplusplus
 }

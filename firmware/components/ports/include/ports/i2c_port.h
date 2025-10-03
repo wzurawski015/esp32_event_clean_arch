@@ -1,69 +1,79 @@
 /**
  * @file i2c_port.h
- * @brief Abstrakcyjny interfejs magistrali I²C dla warstwy "ports" (Clean Architecture).
+ * @brief Abstrakcyjny interfejs magistrali I²C dla warstwy "ports".
  *
- * Ten nagłówek definiuje *czysto abstrahowane* API na potrzeby warstw wyższych
- * (services / drivers). Prawdziwa implementacja znajduje się w komponencie
- * **infrastructure__idf_i2c_port**, który opiera się na **nowym** sterowniku
- * ESP‑IDF `driver/i2c_master.h`.
- *
- * @dot
- * digraph G {
- *   rankdir=LR; node [shape=box, fontname="Helvetica"];
- *   app     [label="projects/<app> (app)"];
- *   drv     [label="drivers__*"];
- *   svc     [label="services__i2c"];
- *   ports   [label="ports::i2c_port (to API)"];
- *   infra   [label="infrastructure__idf_i2c_port\n(driver/i2c_master.h)"];
- *   hw      [label="I2C HW", shape=circle];
- *   app  -> drv -> svc -> ports -> infra -> hw;
- * }
- * @enddot
+ * Warstwa ports nie zależy od ESP-IDF; na błędy używa port_err_t z ports/errors.h.
+ * Implementację dla IDF dostarcza komponent infrastructure__idf_i2c_port.
  */
-
 #pragma once
 
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
-#include "esp_err.h"
+#include "ports/errors.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-/** Opaque typy uchwytów – ukrywamy detale implementacji. */
-typedef struct i2c_bus  i2c_bus_t;
-typedef struct i2c_dev  i2c_dev_t;
+/* Opaque typy uchwytów – detale ukryte w implementacji. */
+typedef struct i2c_bus i2c_bus_t;
+typedef struct i2c_dev i2c_dev_t;
 
 /** Konfiguracja utworzenia magistrali I²C. */
 typedef struct {
     int      sda_gpio;                /**< Numer GPIO dla SDA. */
     int      scl_gpio;                /**< Numer GPIO dla SCL. */
-    bool     enable_internal_pullup;  /**< true => włącz pull‑up wpadkowy (jeśli potrzebne). */
+    bool     enable_internal_pullup;  /**< true => włącz pull‑up (fallback). */
     uint32_t clk_hz;                  /**< Częstotliwość I²C (np. 100k, 400k). */
 } i2c_bus_cfg_t;
 
-/** Utwórz/zwolnij magistralę. */
-esp_err_t i2c_bus_create(const i2c_bus_cfg_t* cfg, i2c_bus_t** out_bus);
-esp_err_t i2c_bus_delete(i2c_bus_t* bus);
+/** Utworzenie/zwolnienie magistrali. */
+port_err_t i2c_bus_create(const i2c_bus_cfg_t* cfg, i2c_bus_t** out_bus);
+port_err_t i2c_bus_delete(i2c_bus_t* bus);
 
-/** Dodaj/usuń urządzenie (7‑bitowy adres). */
-esp_err_t i2c_dev_add(i2c_bus_t* bus, uint8_t addr7, i2c_dev_t** out_dev);
-esp_err_t i2c_dev_remove(i2c_dev_t* dev);
+/** Dodanie/usunięcie urządzenia (7‑bitowy adres). */
+port_err_t i2c_dev_add(i2c_bus_t* bus, uint8_t addr7, i2c_dev_t** out_dev);
+port_err_t i2c_dev_remove(i2c_dev_t* dev);
+
+/** Prymitywy I²C (zwykle używane przez services__i2c). */
+port_err_t i2c_tx(i2c_dev_t* dev, const uint8_t* tx, size_t txlen, uint32_t timeout_ms);
+port_err_t i2c_rx(i2c_dev_t* dev, uint8_t* rx, size_t rxlen, uint32_t timeout_ms);
+port_err_t i2c_txrx(i2c_dev_t* dev,
+                    const uint8_t* tx, size_t txlen,
+                    uint8_t* rx, size_t rxlen,
+                    uint32_t timeout_ms);
 
 /**
- * @name Przeniesione prymitywy I²C
- * @note Zwykle nie wołasz ich z aplikacji – są kolejkowane przez services__i2c.
- * @{
+ * @brief Sondowanie pojedynczego adresu 7‑bit.
+ *
+ * Semantyka:
+ *  - Zwraca PORT_OK, a w @p out_ack wpisuje true, gdy urządzenie potwierdzi (ACK).
+ *  - Zwraca PORT_OK, a w @p out_ack wpisuje false, gdy brak ACK (adres pusty).
+ *  - Zwraca kod błędu (np. PORT_ERR_INVALID_ARG) tylko dla błędnych parametrów /
+ *    błędów sterownika.
  */
-esp_err_t i2c_tx(i2c_dev_t* dev, const uint8_t* tx, size_t txlen, uint32_t timeout_ms);
-esp_err_t i2c_rx(i2c_dev_t* dev, uint8_t* rx, size_t rxlen, uint32_t timeout_ms);
-esp_err_t i2c_txrx(i2c_dev_t* dev,
-                   const uint8_t* tx, size_t txlen,
-                   uint8_t* rx, size_t rxlen,
-                   uint32_t timeout_ms);
-/** @} */
+port_err_t i2c_bus_probe_addr(i2c_bus_t* bus,
+                              uint8_t addr7,
+                              uint32_t timeout_ms,
+                              bool* out_ack);
+
+/**
+ * @brief Skanowanie zakresu adresów; wpisuje znalezione adresy do @p out_found.
+ * @param start  Pierwszy adres (zalecane >= 0x03)
+ * @param end    Ostatni adres (zalecane <= 0x77)
+ * @param timeout_ms  Timeout pojedynczej próby
+ * @param out_found   Opcjonalny bufor na adresy (może być NULL)
+ * @param cap         Pojemność bufora out_found
+ * @param out_n       Zwrócona liczba znalezionych adresów (może być NULL)
+ */
+port_err_t i2c_bus_scan_range(i2c_bus_t* bus,
+                              uint8_t start,
+                              uint8_t end,
+                              uint32_t timeout_ms,
+                              uint8_t* out_found,
+                              size_t cap,
+                              size_t* out_n);
 
 #ifdef __cplusplus
 }

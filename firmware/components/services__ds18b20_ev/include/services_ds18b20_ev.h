@@ -13,21 +13,23 @@
 #include <stdint.h>
 
 #ifdef __cplusplus
-extern "C" {
+extern "C"
+{
 #endif
 
-typedef struct {
-    int gpio;
-    int resolution_bits;   /* 9..12 */
-    int period_ms;         /* co ile wykonywać konwersje */
-    bool internal_pullup;  /* true → włącz wewn. pull-up (zalecany i tak zewn. 4.7k) */
-} ds18_svc_cfg_t;
+    typedef struct
+    {
+        int  gpio;
+        int  resolution_bits; /* 9..12 */
+        int  period_ms;       /* co ile wykonywać konwersje */
+        bool internal_pullup; /* true → włącz wewn. pull-up (zalecany i tak zewn. 4.7k) */
+    } ds18_svc_cfg_t;
 
-/** Start serwisu. Zwraca true jeżeli udało się wystartować. */
-bool services_ds18_start(const ds18_svc_cfg_t* cfg);
+    /** Start serwisu. Zwraca true jeżeli udało się wystartować. */
+    bool services_ds18_start(const ds18_svc_cfg_t* cfg);
 
-/** Stop serwisu (opcjonalny). */
-void services_ds18_stop(void);
+    /** Stop serwisu (opcjonalny). */
+    void services_ds18_stop(void);
 
 #ifdef __cplusplus
 }

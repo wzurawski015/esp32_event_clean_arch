@@ -25,8 +25,9 @@ Ekstremalnie **event-driven** szkielet dla rodziny ESP32 (ESP32, S2, S3, C3, C6,
 # 1) Wybór projektu i targetu
 export PROJ=demo_lcd_rgb
 export TARGET=esp32c6
-# 1a)
+# 1a) Budowa i flash (auto-wykrycie portu)
 ./scripts/idf.sh fullclean && ./scripts/build.sh && ESPPORT=$(./scripts/find-port.sh) ./scripts/flash-monitor.sh
+# alternatywnie od razu na nowszym obrazie:
 ./scripts/idf.sh fullclean && IDF_IMAGE=esp32-idf:5.5.1 ESPPORT=$(./scripts/find-port.sh) ./scripts/flash-monitor.sh
 
 # 2) Konfiguracja (menuconfig)
@@ -149,9 +150,117 @@ IDF_IMAGE=espressif/idf:v5.5.1 ./scripts/build.sh
 
 ---
 
-### Szybki sanity-check po podmianie
-- `shellcheck scripts/idf.sh` → brak błędów.  
-- `IDF_IMAGE=espressif/idf:v5.5.1 ./scripts/build.sh` → powinno zbudować bez zmian w źródłach.  
-- `IDF_IMAGE=esp32-idf:5.5.1` (Twój lokalny obraz) działa identycznie; zmieniasz tylko zmienną środowiskową.  
+## Migracja do ESP‑IDF 6.x (bez ryzyka)
 
-Gdybyś chciał, mogę przygotować jeszcze patch do `Docker/Dockerfile.idf-5.5.1` (z poprawnym `FROM espressif/idf:v5.5.1`) i krótki workflow GitHub Actions z matrixem IDF/targets.
+Poniżej „zielony” plan i gotowe komendy, aby przejść na ESP‑IDF 6.x obok istniejącej wersji (bez dotykania źródeł). Wszystko opiera się o zmienną `IDF_IMAGE` obsługiwaną przez skrypty.
+
+### Wariant A — oficjalny obraz Espressifa (np. `v6.0` lub `v6.0.1`)
+
+1. **Sprawdź dostępność taga** (z literą `v`):
+   ```bash
+   docker manifest inspect espressif/idf:v6.0   >/dev/null && echo "OK: v6.0 dostępny"
+   docker manifest inspect espressif/idf:v6.0.1 >/dev/null && echo "OK: v6.0.1 dostępny"
+   ```
+2. **Zbuduj projekt „na czysto” i wgraj**:
+   ```bash
+   export IDF_IMAGE="espressif/idf:v6.0"   # lub dokładny: espressif/idf:v6.0.1
+   ./scripts/idf.sh fullclean
+   ./scripts/build.sh
+   ESPPORT=$(./scripts/find-port.sh) ./scripts/flash-monitor.sh
+   ```
+3. **Zweryfikuj w monitorze**, że masz `ESP-IDF v6.x.y`, skan I²C wykrywa LCD (0x3E) i RGB (0x2D/0x62), a `EV_LCD_READY` się pojawia.
+
+> Chcesz zrobić z tego domyślny obraz dla zespołu? Wystarczy zmienną `IMAGE=` w `scripts/idf.sh` ustawić na `espressif/idf:v6.0`. Nie jest to wymagane — `IDF_IMAGE` nadpisuje domyślną wartość.
+
+### Wariant B — własny obraz (z Doxygen/Graphviz)
+
+1. **Dockerfile dla IDF 6**: `Docker/Dockerfile.idf-6.0`
+   ```Dockerfile
+   FROM espressif/idf:v6.0
+   RUN apt-get update && apt-get install -y --no-install-recommends \
+         doxygen graphviz && \
+       rm -rf /var/lib/apt/lists/*
+   WORKDIR /fw
+   ```
+2. **Budowa lokalnego obrazu**:
+   ```bash
+   docker build --pull -f Docker/Dockerfile.idf-6.0 -t esp32-idf:6.0 .
+   ```
+3. **Test projektu na tym obrazie**:
+   ```bash
+   export IDF_IMAGE="esp32-idf:6.0"
+   ./scripts/idf.sh fullclean
+   ./scripts/build.sh
+   ESPPORT=$(./scripts/find-port.sh) ./scripts/flash-monitor.sh
+   ```
+
+### Rollback w 1 krok (bez zmian w źródłach)
+
+```bash
+export IDF_IMAGE="esp32-idf:5.5.1"      # albo espressif/idf:v5.5.1
+./scripts/idf.sh fullclean
+./scripts/build.sh
+ESPPORT=$(./scripts/find-port.sh) ./scripts/flash-monitor.sh
+```
+
+### Mini‑checklista po migracji
+
+- **Pełny clean po zmianie wersji**:
+  ```bash
+  ./scripts/idf.sh fullclean
+  ```
+  (usuwa cache CMake i środowisko Pythona skojarzone z poprzednim IDF).
+- **`menuconfig` po pierwszym buildzie** — zapisz `sdkconfig`, aby przepisać ewentualne symbole zastąpione nowszymi odpowiednikami.
+- **I²C/LCD sanity**:
+  - zacznij od `APP_I2C_HZ=100 kHz`, potem testuj 400 kHz,
+  - sprawdź adresy: LCD=0x3E, RGB=0x2D **lub** 0x62 (zależnie od modułu),
+  - w logu powinno być: `found 0x2D` i `found 0x3E`, następnie `LCD/RGB: start init` i `EV_LCD_READY` w aplikacji.
+- **SPI Flash (opcjonalnie)**: jeśli zobaczysz ostrzeżenie o „generic flash driver” dla GigaDevice,
+  włącz wykrywanie w `menuconfig` → *Component config → SPI Flash driver → Auto-detect flash chips* → zaznacz wsparcie dla GigaDevice.
+- **Dokumentacja** (jeśli używasz lokalnego obrazu z Doxygenem):
+  ```bash
+  ./scripts/gen-docs.sh
+  # otwórz: docs/html/index.html
+  ```
+
+### Zestawy komend — 1:1 (kopiuj–wklej)
+
+**Oficjalny obraz `v6.0`**:
+```bash
+export IDF_IMAGE="espressif/idf:v6.0"
+./scripts/idf.sh fullclean
+./scripts/build.sh
+ESPPORT=$(./scripts/find-port.sh) ./scripts/flash-monitor.sh
+```
+
+**Własny obraz `esp32-idf:6.0` (z Doxygen/Graphviz)**:
+```bash
+docker build --pull -f Docker/Dockerfile.idf-6.0 -t esp32-idf:6.0 .
+export IDF_IMAGE="esp32-idf:6.0"
+./scripts/idf.sh fullclean
+./scripts/build.sh
+ESPPORT=$(./scripts/find-port.sh) ./scripts/flash-monitor.sh
+```
+
+**Rollback do `5.5.1`**:
+```bash
+export IDF_IMAGE="esp32-idf:5.5.1"
+./scripts/idf.sh fullclean
+./scripts/build.sh
+ESPPORT=$(./scripts/find-port.sh) ./scripts/flash-monitor.sh
+```
+
+### Typowe pułapki i szybkie naprawy
+
+- **Mieszane środowisko Pythona/IDF** w cache → uruchom `fullclean` (zrobisz to szybciej niż diagnoza).
+- **Tag obrazu nie istnieje** → pamiętaj o literze `v` w tagu oficjalnym, np. `espressif/idf:v6.0`.
+- **Zmiany w Kconfig po migracji** → wejdź w `menuconfig`, zapisz, odbuduj.
+- **Zawieszki LCD przy 400 kHz** → wróć na `100 kHz` albo zwiększ `Pauza między paczkami` (1–2 ms).
+
+---
+
+### Sanity-check po podmianie obrazu
+- `shellcheck scripts/idf.sh` → brak błędów.
+- `IDF_IMAGE=espressif/idf:v6.0 ./scripts/build.sh` → projekt się buduje bez zmian źródeł.
+- `IDF_IMAGE=esp32-idf:6.0` (lokalny obraz z Doxygen/Graphviz) działa identycznie; decydujesz zmienną środowiskową.
+

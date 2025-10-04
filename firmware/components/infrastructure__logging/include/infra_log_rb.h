@@ -1,49 +1,53 @@
-/**
- * @file infra_log_rb.h
- * @brief Publiczne API do snapshot/tail/stat/clear ring-bufora logów.
- *
- * @dot
- * digraph RB {
- *   rankdir=LR; node [shape=box, fontsize=10];
- *   "log_write()" -> "Ring buffer" [label="rb_push_line"];
- *   "CLI logrb"   -> "Ring buffer" [label="stat/tail/dump/clear"];
- * }
- * @enddot
- */
 #pragma once
 #include <stddef.h>
+#include <stdint.h>
 #include <stdbool.h>
+// #include "esp_err.h"  // nie jest potrzebne w tym nagłówku, zostaw jeśli używasz gdzie indziej
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-/** @brief Zwraca pojemność bufora, bieżące użycie oraz flagę overflow. */
-void infra_log_rb_stat(size_t* capacity, size_t* used, bool* overflowed);
+/* ===== API już przez Ciebie dodane (zostawiamy) ===== */
 
-/** @brief Czyści całą zawartość ringu (atomowo). */
+/** Zwraca aktualny rozmiar logiczny danych (ile bajtów jest pełnych do odczytu). */
+size_t infra_log_rb_len(void);
+
+/** Zwraca rozmiar fizyczny bufora (pojemność). */
+size_t infra_log_rb_cap(void);
+
+/**
+ * Odczyt chronologiczny (od najstarszego do najnowszego).
+ *  - offset: przesunięcie od najstarszego bajtu [0..infra_log_rb_len()).
+ *  - dst/len: bufor docelowy i jego rozmiar.
+ * Zwraca liczbę wypełnionych bajtów. Snapshot wskaźników bez ciężkich sekcji krytycznych.
+ */
+size_t infra_log_rb_read(size_t offset, uint8_t *dst, size_t len);
+
+/** Zrzut całości ring-bufora do logów (INFO), w porcjach bez przepełniania. */
+void infra_log_rb_dump(void);
+
+/** (Opcjonalnie) Zrzut w trybie HEX (dla danych binarnych). */
+void infra_log_rb_dump_hex(size_t bytes_per_line);
+
+
+/* ===== API wymagane przez logging_cli.c (brakujące wcześniej) =====
+ * Te cztery deklaracje MUSZĄ być widoczne przy włączonym ring‑bufferze.
+ * Podpisy są zgodne z użyciem w logging_cli.c.
+ */
+#if CONFIG_INFRA_LOG_RINGBUF
+/** Zwraca pojemność, zajętość oraz flagę overflow (wskaźniki mogą być NULL). */
+void infra_log_rb_stat(size_t *out_cap, size_t *out_used, bool *out_overflow);
+
+/** Czyści bufor (zeruje zawartość i flagę overflow). */
 void infra_log_rb_clear(void);
 
-/**
- * @brief Wykonuje snapshot całej zawartości (od najstarszych do najnowszych).
- *
- * @param[out] out     Bufor wyjściowy.
- * @param[in]  max     Rozmiar bufora @p out.
- * @param[out] out_len Faktyczna liczba skopiowanych bajtów.
- * @return true, jeśli skopiowano; false w razie błędu parametrów.
- */
-bool infra_log_rb_snapshot(char* out, size_t max, size_t* out_len);
+/** Migawka najstarsze→najnowsze do dst; true jeśli cokolwiek skopiowano. */
+bool infra_log_rb_snapshot(char *dst, size_t dst_cap, size_t *out_got);
 
-/**
- * @brief Zwraca końcówkę logów – ostatnie @p tail_bytes bajtów (lub mniej).
- *
- * @param[out] out     Bufor wyjściowy.
- * @param[in]  max     Rozmiar bufora @p out.
- * @param[in]  tail_bytes Żądana ilość bajtów od końca.
- * @param[out] out_len Faktyczna liczba skopiowanych bajtów.
- * @return true/false (jak wyżej).
- */
-bool infra_log_rb_tail(char* out, size_t max, size_t tail_bytes, size_t* out_len);
+/** Zapisuje do dst ostatnie want_tail bajtów; true jeśli cokolwiek skopiowano. */
+bool infra_log_rb_tail(char *dst, size_t dst_cap, size_t want_tail, size_t *out_got);
+#endif /* CONFIG_INFRA_LOG_RINGBUF */
 
 #ifdef __cplusplus
 }

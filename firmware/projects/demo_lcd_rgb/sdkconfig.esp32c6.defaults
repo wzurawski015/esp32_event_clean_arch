@@ -2,14 +2,14 @@
 CONFIG_ESPTOOLPY_FLASHSIZE_8MB=y
 CONFIG_ESPTOOLPY_FLASHSIZE="8MB"
 
-# Tryb/frek. flash zgodnie z tym, co już masz (DIO, 80 MHz)
+# Tryb/frek. flash
 CONFIG_ESPTOOLPY_FLASHMODE_DIO=y
 CONFIG_ESPTOOLPY_FLASHFREQ_80M=y
 CONFIG_ESPTOOLPY_FLASHFREQ="80m"
 
-# (Opcjonalnie) jeśli kiedyś korzystałbyś z auto‑korekty nagłówka:
-# CONFIG_ESPTOOLPY_HEADER_FLASHSIZE_UPDATE=y
+# Siatka bezpieczeństwa: esptool skoryguje nagłówek na "8MB" przy flashowaniu
+#CONFIG_ESPTOOLPY_HEADER_FLASHSIZE_UPDATE=y
 
-# I2C na C6 (spójne z Twoim kodem)
+# I2C na C6
 CONFIG_APP_I2C_SDA=10
 CONFIG_APP_I2C_SCL=11

@@ -4,7 +4,7 @@ CONFIG_ESP_CONSOLE_UART=y
 CONFIG_ESP_CONSOLE_UART_NUM=0
 CONFIG_ESP_CONSOLE_UART_BAUDRATE=115200
 
-# USB-Serial-JTAG wyłączony jako konsola
-# (nie używamy USB, więc także secondary na USB wyłączamy)
+# USB-Serial-JTAG wyłączony i brak konsoli secondary
+# (używasz tylko UART – zgodnie z Twoim założeniem)
 # CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG is not set
-# CONFIG_ESP_CONSOLE_SECONDARY_USB_SERIAL_JTAG is not set
+CONFIG_ESP_CONSOLE_SECONDARY_NONE=y

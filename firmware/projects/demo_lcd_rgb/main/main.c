@@ -28,6 +28,7 @@
  *   - ESP32-S2: SDA=33, SCL=35
  */
 
+#include "sdkconfig.h"      // <<< potrzebne dla CONFIG_* (np. INFRA_LOG_CLI/START_REPL)
 #include "core_ev.h"
 #include "ports/log_port.h"
 #include "freertos/FreeRTOS.h"
@@ -120,9 +121,9 @@ void app_main(void)
      */
 #if CONFIG_INFRA_LOG_CLI
   #if CONFIG_INFRA_LOG_CLI_START_REPL
-    infra_log_cli_start_repl();
+    infra_log_cli_start_repl();   // start REPL + rejestracja komendy
   #else
-    infra_log_cli_register();
+    infra_log_cli_register();     // tylko rejestracja komendy (bez REPL)
   #endif
 #endif
 

@@ -21,6 +21,10 @@
  * }
  * @enddot
  *
+ * @note
+ *   - Tick przeniesiony na poziom DEBUG – czystszy UART, a logi dalej dostępne
+ *     w ring‑bufferze i przez CLI (logrb tail/dump).
+ *
  * @note Pinologia domyślna (zmienisz w menuconfig):
  *   - ESP32-C6: SDA=10, SCL=11
  *   - ESP32-C3: SDA=8,  SCL=9
@@ -121,9 +125,9 @@ void app_main(void)
      */
 #if CONFIG_INFRA_LOG_CLI
   #if CONFIG_INFRA_LOG_CLI_START_REPL
-    infra_log_cli_start_repl();   // start REPL + rejestracja komendy
+    infra_log_cli_start_repl();   // start REPL + rejestracja komend
   #else
-    infra_log_cli_register();     // tylko rejestracja komendy (bez REPL)
+    infra_log_cli_register();     // tylko rejestracja komend (bez REPL)
   #endif
 #endif
 
@@ -146,7 +150,7 @@ void app_main(void)
             }
             else if (m.src == EV_SRC_TIMER && m.code == EV_TICK_1S)
             {
-                LOGI(TAG, "[%u ms] tick", (unsigned)m.t_ms);
+                LOGD(TAG, "[%u ms] tick", (unsigned)m.t_ms); // << DEBUG zamiast INFO
             }
         }
     }

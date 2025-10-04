@@ -1,24 +1,25 @@
 /**
  * @file logging_cli.c
- * @brief Komenda CLI do zrzutu ring‑buffera loggera + (opcjonalny) REPL UART.
+ * @brief CLI: logrb (ring-buffer) + loglvl (poziomy logów) + opcjonalny REPL UART.
  *
  * @details
- *  - Gdy w Kconfig włączone **INFRA_LOG_CLI**, rejestruje komendę:
- *        logrb stat | clear | dump [--limit N] | tail [N]
- *  - Gdy włączone **INFRA_LOG_CLI_START_REPL**, uruchamia REPL na UART0 (115200)
- *    wykorzystując `esp_console_new_repl_uart()` i `esp_console_start_repl()`.
- *
- *  Makra konfiguracyjne pochodzą z `sdkconfig.h` – MUSZĄ być widoczne w TU.
+ *  - W Kconfig włącz \c CONFIG_INFRA_LOG_CLI, by zarejestrować komendy:
+ *        \code
+ *        logrb  stat | clear | dump [--limit N] | tail [N]
+ *        loglvl <TAG|*> <E|W|I|D|V>
+ *        \endcode
+ *  - Włącz \c CONFIG_INFRA_LOG_CLI_START_REPL, by uruchomić REPL na UART0 (115200).
  *
  * @dot
  * digraph CLI {
  *   rankdir=LR; node [shape=box, fontsize=10];
  *   Host -> "idf_monitor/REPL" -> "esp_console" -> "cmd_logrb()" -> "infra_log_rb_*()";
+ *   "esp_console" -> "cmd_loglvl()" -> "esp_log_level_set()";
  * }
  * @enddot
  */
 
-#include "sdkconfig.h"          // <<< WAŻNE: bez tego #if CONFIG_* == 0 i CLI się nie buduje
+#include "sdkconfig.h"          // makra CONFIG_*
 #include "infra_log_rb.h"
 #include "ports/log_port.h"
 
@@ -35,13 +36,8 @@
 
 #define TAG "LOGCLI"
 
-/**
- * @brief Implementacja polecenia `logrb`.
- *
- * @param argc  liczba argumentów (argv[0] == "logrb")
- * @param argv  wektor argumentów
- * @return int  0 przy sukcesie (konwencja esp_console)
- */
+/* ========================= logrb ========================= */
+
 static int cmd_logrb(int argc, char** argv)
 {
 #if !CONFIG_INFRA_LOG_RINGBUF
@@ -120,27 +116,62 @@ static int cmd_logrb(int argc, char** argv)
 #endif // CONFIG_INFRA_LOG_RINGBUF
 }
 
-/**
- * @brief Rejestracja komendy `logrb` w esp_console.
+/* ========================= loglvl =========================
+ * Zmiana poziomu logów w locie: loglvl <TAG|*> <E|W|I|D|V>
  */
+static int cmd_loglvl(int argc, char** argv)
+{
+    if (argc < 3) {
+        printf("użycie: loglvl <TAG|*> <E|W|I|D|V>\n");
+        return 0;
+    }
+    const char* tag = argv[1];
+    char lvlch = argv[2][0];
+
+    esp_log_level_t lvl = ESP_LOG_INFO;
+    switch (lvlch) {
+        case 'E': lvl = ESP_LOG_ERROR;   break;
+        case 'W': lvl = ESP_LOG_WARN;    break;
+        case 'I': lvl = ESP_LOG_INFO;    break;
+        case 'D': lvl = ESP_LOG_DEBUG;   break;
+        case 'V': lvl = ESP_LOG_VERBOSE; break;
+        default:
+            printf("nieznany poziom: %s (użyj E/W/I/D/V)\n", argv[2]);
+            return 0;
+    }
+
+    esp_log_level_set(tag, lvl);
+    printf("log level for '%s' -> %c\n", tag, lvlch);
+    return 0;
+}
+
+/* ==================== rejestracja CLI ==================== */
+
 void infra_log_cli_register(void)
 {
-    const esp_console_cmd_t cmd = {
+    const esp_console_cmd_t cmd_logrb_desc = {
         .command = "logrb",
         .help    = "logrb stat|clear|dump [--limit N]|tail [N]",
         .hint    = NULL,
         .func    = &cmd_logrb,
         .argtable= NULL
     };
-    ESP_ERROR_CHECK(esp_console_cmd_register(&cmd));
-    LOGI(TAG, "registered 'logrb' command");
+    ESP_ERROR_CHECK(esp_console_cmd_register(&cmd_logrb_desc));
+
+    const esp_console_cmd_t cmd_loglvl_desc = {
+        .command = "loglvl",
+        .help    = "loglvl <TAG|*> <E|W|I|D|V>  (zmień poziom logów w locie)",
+        .hint    = NULL,
+        .func    = &cmd_loglvl,
+        .argtable= NULL
+    };
+    ESP_ERROR_CHECK(esp_console_cmd_register(&cmd_loglvl_desc));
+
+    LOGI(TAG, "registered 'logrb' and 'loglvl' commands");
 }
 
-/**
- * @brief Start REPL UART (UART0, 115200) i rejestracja komendy `logrb`.
- *
- * Tworzy REPL i startuje jego task; zwalnianie pamięci realizuje kod esp_console.
- */
+/* ========================== REPL ========================= */
+
 void infra_log_cli_start_repl(void)
 {
 #if CONFIG_INFRA_LOG_CLI_START_REPL
@@ -150,28 +181,23 @@ void infra_log_cli_start_repl(void)
     repl_cfg.max_cmdline_length = 256;
 
     esp_console_dev_uart_config_t uart_cfg = ESP_CONSOLE_DEV_UART_CONFIG_DEFAULT();
-    uart_cfg.channel    = UART_NUM_0;
-    uart_cfg.tx_gpio_num= -1;          // domyślne piny UART0
-    uart_cfg.rx_gpio_num= -1;
-    uart_cfg.baud_rate  = 115200;
+    uart_cfg.channel     = UART_NUM_0;
+    uart_cfg.tx_gpio_num = -1;  // domyślne piny UART0
+    uart_cfg.rx_gpio_num = -1;
+    uart_cfg.baud_rate   = 115200;
 
-    // Inicjalizacja REPL i rejestracja komendy
     ESP_ERROR_CHECK(esp_console_new_repl_uart(&uart_cfg, &repl_cfg, &repl));
     infra_log_cli_register();
     ESP_ERROR_CHECK(esp_console_start_repl(repl));
 
-    LOGI(TAG, "UART REPL started — wpisz 'logrb stat|dump|tail|clear'");
+    LOGI(TAG, "UART REPL started — wpisz 'logrb …' lub 'loglvl <TAG|*> <E|W|I|D|V>'");
 #else
-    // REPL wyłączony – ale zarejestruj komendę, gdyby ktoś użył własnego stdin loop
     infra_log_cli_register();
-    LOGI(TAG, "registered 'logrb' (REPL not started; CONFIG_INFRA_LOG_CLI_START_REPL=n)");
+    LOGI(TAG, "registered CLI (REPL not started; CONFIG_INFRA_LOG_CLI_START_REPL=n)");
 #endif
 }
 
 #else   // !CONFIG_INFRA_LOG_CLI
-
-// Stub’y gdy CLI wyłączone w Kconfig – utrzymują linkowanie.
 void infra_log_cli_register(void)   {}
 void infra_log_cli_start_repl(void) {}
-
 #endif  // CONFIG_INFRA_LOG_CLI

@@ -1,0 +1,10 @@
+# --- CLI & REPL ---
+CONFIG_INFRA_LOG_CLI=y
+CONFIG_INFRA_LOG_CLI_START_REPL=y
+CONFIG_INFRA_LOG_RINGBUF=y
+CONFIG_INFRA_LOG_CLI_TAIL_DEFAULT=1024
+
+# --- Poziomy logów (kompilacja vs runtime) ---
+# Kompiluj do DEBUG (żeby LOGD istniały), ale domyślnie pokazuj INFO.
+CONFIG_LOG_MAXIMUM_LEVEL_DEBUG=y
+CONFIG_LOG_DEFAULT_LEVEL_INFO=y

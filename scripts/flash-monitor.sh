@@ -1,31 +1,37 @@
 #!/usr/bin/env bash
+#==============================================================================
+# @file flash-monitor.sh
+# @brief Flash + Monitor dla projektu ESP-IDF z wygodnym filtrowaniem logów.
+#
+# @details
+#  - Buduje i flashuje wybrany projekt, następnie uruchamia idf_monitor.
+#  - Wspiera przyjazne filtrowanie logów przez zmienną IDF_MONITOR_FILTER.
+#    Składnia wejściowa (elastyczna):
+#       IDF_MONITOR_FILTER="*:I APP:W LOGCLI:I"
+#       IDF_MONITOR_FILTER="*:I,APP:W,LOGCLI:I"
+#       IDF_MONITOR_FILTER="*:I;APP:W;LOGCLI:I"
+#    Każdy token musi być postaci TAG:LVL, gdzie LVL ∈ {E,W,I,D,V}.
+#    Skrypt zamienia to na wielokrotne --print_filter 'TAG:LVL'
+#    wymagane przez ESP-IDF 5.5.
+#
+# @dot
+# digraph MON {
+#   rankdir=LR; node [shape=box, fontsize=10];
+#   subgraph cluster_host { label="Host"; "flash-monitor.sh"; }
+#   "flash-monitor.sh" -> "idf.sh flash";
+#   "flash-monitor.sh" -> "Filtr tokens" [label="IDF_MONITOR_FILTER"];
+#   "Filtr tokens" -> "idf.sh monitor" [label="--print_filter 'TAG:LVL' x N"];
+# }
+# @enddot
+#
+# @note Skróty w idf_monitor:
+#   - Ctrl+T,Y  — pauza/wznowienie wyjścia,
+#   - Ctrl+]     — wyjście,
+#   - Ctrl+T,H   — pomoc.
+#
+#==============================================================================
+
 set -Eeuo pipefail
-#/*! \file scripts/flash-monitor.sh
-# *  \brief Jednoprzyciskowy Flash + Monitor z filtrowaniem logów IDF.
-# *
-# *  \details
-# *   - Flashuje firmware i odpala `idf.py monitor` z domyślnym filtrem logów.
-# *   - Filtrowanie można nadpisać zmienną środowiskową \c IDF_MONITOR_FILTER.
-# *   - Dodatkowe argumenty po \c -- są przekazywane prosto do monitora.
-# *
-# *  \par Szybki start
-# *  \code
-# *  ESPPORT=$(./scripts/find-port.sh) ./scripts/flash-monitor.sh
-# *  # lub z własnym filtrem:
-# *  IDF_MONITOR_FILTER="*:I,APP:W" ESPPORT=$(./scripts/find-port.sh) ./scripts/flash-monitor.sh
-# *  # lub jednorazowo przez argumenty po "--":
-# *  ESPPORT=$(./scripts/find-port.sh) ./scripts/flash-monitor.sh -- --print_filter "*:I,APP:W"
-# *  \endcode
-# *
-# *  \dot
-# *  digraph Tooling {
-# *    rankdir=LR; node [shape=box, fontsize=10];
-# *    Host -> "flash-monitor.sh" -> "idf.sh" -> "idf.py flash";
-# *    "flash-monitor.sh" -> "idf.sh (monitor)" -> "idf.py monitor" [label="--print_filter"];
-# *    "idf.py monitor" -> "ESP32-Cx UART";
-# *  }
-# *  \enddot
-# */
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
@@ -41,19 +47,41 @@ fi
 ESPBAUD="${ESPBAUD:-460800}"
 MONBAUD="${MONBAUD:-115200}"
 
-# Domyślny filtr IDF monitor:
-#  - wszystko na INFO,
-#  - tag "APP" (ticki) dopiero od WARN,
-#  - "LOGCLI" zostaw INFO (widzimy komunikaty CLI/REPL).
-IDF_MONITOR_FILTER_DEFAULT="*:I,APP:W,LOGCLI:I"
-FILTER_OPT=(--print_filter "${IDF_MONITOR_FILTER:-$IDF_MONITOR_FILTER_DEFAULT}")
+#--------------------------- Filtr logów (IDF 5.5) ----------------------------
+# Domyślnie: global INFO, APP od WARN (wycisza ticki INFO), LOGCLI na INFO.
+IDF_MONITOR_FILTER_DEFAULT="*:I APP:W LOGCLI:I"
+RAW_FILTER="${IDF_MONITOR_FILTER:-$IDF_MONITOR_FILTER_DEFAULT}"
+
+# Pozwól używać spacji / przecinków / średników jako separatorów.
+RAW_FILTER="${RAW_FILTER//,/ }"
+RAW_FILTER="${RAW_FILTER//;/ }"
+
+# Zbuduj listę wielokrotnych --print_filter 'TAG:LVL'
+read -r -a _TOKENS <<< "$RAW_FILTER"
+MON_FILTER_ARGS=()
+for tok in "${_TOKENS[@]}"; do
+  [[ -z "$tok" ]] && continue
+  # Walidacja bazowa: dokładnie jeden dwukropek
+  if [[ "$tok" != *:* || "$(tr -dc ':' <<<"$tok" | wc -c)" -ne 1 ]]; then
+    echo "ERR: Niepoprawny token filtra: '$tok' (wymagany format TAG:LVL)" >&2
+    echo "    Przykłady: '*:I'  'APP:W'  'LOGCLI:I'  'DFR_LCD:D'" >&2
+    exit 3
+  fi
+  # Dodaj jeden argument --print_filter na token (tak wymaga IDF 5.5)
+  MON_FILTER_ARGS+=( --print_filter "$tok" )
+done
 
 echo "Flash+Monitor: ${ESPPORT}  (Ctrl+] aby wyjść)  |  IMAGE=${IDF_IMAGE:-esp32-idf:5.5.1}"
+echo "Monitor filter: ${RAW_FILTER}"
 
-# Flash
+#--------------------------------- Flash --------------------------------------
 PROJ="${PROJ}" TARGET="${TARGET}" ESPPORT="${ESPPORT}" \
   "${ROOT}/scripts/idf.sh" -p "${ESPPORT}" -b "${ESPBAUD}" flash
 
-# Monitor (dodatkowe argumenty po '--' trafią do idf.py monitor)
+#-------------------------------- Monitor -------------------------------------
+# Przekazujemy przygotowane filtry jako oddzielne argumenty:
 PROJ="${PROJ}" TARGET="${TARGET}" ESPPORT="${ESPPORT}" \
-  "${ROOT}/scripts/idf.sh" -p "${ESPPORT}" monitor --monitor-baud "${MONBAUD}" "${FILTER_OPT[@]}" "$@"
+  "${ROOT}/scripts/idf.sh" -p "${ESPPORT}" monitor \
+    --monitor-baud "${MONBAUD}" \
+    "${MON_FILTER_ARGS[@]}" \
+    "$@"

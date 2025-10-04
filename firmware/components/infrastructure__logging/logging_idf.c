@@ -71,16 +71,29 @@ void log_write(log_level_t lvl, const char* tag, const char* fmt, ...)
 
     // 3) Preformatuj wiadomość do bufora (aby użyć LOG_FORMAT z "%s")
     char msg[192];
-    int  nn = vsnprintf(msg, sizeof(msg), fmt ? fmt : "", ap);
-    (void)nn; // nie musimy używać zwrotki
+    (void)vsnprintf(msg, sizeof(msg), fmt ? fmt : "", ap);
     va_end(ap);
 
-    // 4) Wywołaj esp_log_write z LOG_FORMAT(letter, "%s") => standardowy nagłówek + newline
+    // 4) Wywołaj esp_log_write z LOG_FORMAT(letter, "%s")
+    //    UWAGA: LOG_FORMAT oczekuje: (timestamp_u32, tag, ...twoje argumenty...)
+    uint32_t ts = esp_log_timestamp();
+    const char* tag_str = tag ? tag : "";
+
     switch (lvl) {
-    case LOG_ERROR:   esp_log_write(ESP_LOG_ERROR,   tag, LOG_FORMAT(E, "%s"), msg); break;
-    case LOG_WARN:    esp_log_write(ESP_LOG_WARN,    tag, LOG_FORMAT(W, "%s"), msg); break;
-    case LOG_INFO:    esp_log_write(ESP_LOG_INFO,    tag, LOG_FORMAT(I, "%s"), msg); break;
-    case LOG_DEBUG:   esp_log_write(ESP_LOG_DEBUG,   tag, LOG_FORMAT(D, "%s"), msg); break;
-    default:          esp_log_write(ESP_LOG_VERBOSE, tag, LOG_FORMAT(V, "%s"), msg); break;
+    case LOG_ERROR:
+        esp_log_write(ESP_LOG_ERROR,   tag, LOG_FORMAT(E, "%s"), ts, tag_str, msg);
+        break;
+    case LOG_WARN:
+        esp_log_write(ESP_LOG_WARN,    tag, LOG_FORMAT(W, "%s"), ts, tag_str, msg);
+        break;
+    case LOG_INFO:
+        esp_log_write(ESP_LOG_INFO,    tag, LOG_FORMAT(I, "%s"), ts, tag_str, msg);
+        break;
+    case LOG_DEBUG:
+        esp_log_write(ESP_LOG_DEBUG,   tag, LOG_FORMAT(D, "%s"), ts, tag_str, msg);
+        break;
+    default:
+        esp_log_write(ESP_LOG_VERBOSE, tag, LOG_FORMAT(V, "%s"), ts, tag_str, msg);
+        break;
     }
 }

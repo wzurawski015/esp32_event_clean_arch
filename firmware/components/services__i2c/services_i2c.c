@@ -4,7 +4,7 @@
 #include <string.h>
 
 #include "core_ev.h"
-#include "esp_log.h"
+#include "ports/log_port.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
 #include "freertos/task.h"
@@ -42,6 +42,7 @@ static void worker(void* arg)
                     memcpy(n->r.rx, n->rx_stage, n->r.rxlen);
                 break;
             case I2C_OP_TXRX:
+                /* FIX: używaj bufora n->rx_stage (a nie n->r.rx_stage) */
                 err = i2c_txrx(n->r.dev, n->tx_copy, n->r.txlen, n->rx_stage, n->r.rxlen, n->r.timeout_ms);
                 if (err == ESP_OK && n->r.rx && n->r.rxlen)
                     memcpy(n->r.rx, n->rx_stage, n->r.rxlen);
@@ -59,7 +60,7 @@ static void worker(void* arg)
         else
         {
             ev_post(EV_SRC_I2C, EV_I2C_ERROR, (uintptr_t)n->r.user, (uintptr_t)err);
-            ESP_LOGW(TAG, "I2C op=%d failed: %d", (int)n->r.op, (int)err);
+            LOGW(TAG, "I2C op=%d failed: %d", (int)n->r.op, (int)err);
         }
 
         /* sprzątanie */

@@ -3,13 +3,13 @@
  * @brief Aplikacja demo LCD: nowy I2C + driver DFR0464 (0x3E/0x2D), full event-driven.
  *
  * Pinologia domyślna (zmienisz w menuconfig):
- *  - ESP32-C6: SDA=10, SCL=11   <-- poprawione
+ *  - ESP32-C6: SDA=10, SCL=11
  *  - ESP32-C3: SDA=8,  SCL=9
  *  - ESP32/S3: SDA=21, SCL=22
  *  - ESP32-S2: SDA=33, SCL=35
  */
 #include "core_ev.h"
-#include "esp_log.h"
+#include "ports/log_port.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "idf_i2c_port.h" /* i2c_bus_probe_addr()  */
@@ -24,13 +24,13 @@ static const char* TAG = "APP";
 static void scan_log_and_pick_addrs(i2c_bus_t* bus, uint8_t* out_lcd, uint8_t* out_rgb)
 {
     bool got_lcd = false, got_rgb = false;
-    ESP_LOGI("DFR_LCD", "I2C scan begin");
+    LOGI("DFR_LCD", "I2C scan begin");
     for (uint8_t a = 0x08; a <= 0x77; ++a)
     {
         bool ack = false;
         if (i2c_bus_probe_addr(bus, a, 50, &ack) == ESP_OK && ack)
         {
-            ESP_LOGI("DFR_LCD", "found 0x%02X", a);
+            LOGI("DFR_LCD", "found 0x%02X", a);
             if (!got_lcd && (a == 0x3E || a == 0x3F || a == CONFIG_APP_LCD_ADDR))
             {
                 *out_lcd = a;
@@ -43,7 +43,7 @@ static void scan_log_and_pick_addrs(i2c_bus_t* bus, uint8_t* out_lcd, uint8_t* o
             }
         }
     }
-    ESP_LOGI("DFR_LCD", "I2C scan end");
+    LOGI("DFR_LCD", "I2C scan end");
 
     if (!got_lcd)
         *out_lcd = (uint8_t)CONFIG_APP_LCD_ADDR;
@@ -78,7 +78,7 @@ void app_main(void)
     lcd1602rgb_cfg_t lc = {.dev_lcd = dev_lcd, .dev_rgb = dev_rgb};
     if (!lcd1602rgb_init(&lc))
     {
-        ESP_LOGE(TAG, "LCD init register failed");
+        LOGE(TAG, "LCD init register failed");
     }
 
     /* Subskrypcja eventów do logowania i reakcji */
@@ -102,11 +102,11 @@ void app_main(void)
                 lcd1602rgb_set_rgb(CONFIG_APP_RGB_R, CONFIG_APP_RGB_G, CONFIG_APP_RGB_B);
                 lcd1602rgb_request_flush();
                 once = true;
-                ESP_LOGI(TAG, "LCD gotowy – wysłano pierwszy ekran.");
+                LOGI(TAG, "LCD gotowy – wysłano pierwszy ekran.");
             }
             else if (m.src == EV_SRC_TIMER && m.code == EV_TICK_1S)
             {
-                ESP_LOGI(TAG, "[%u ms] tick", (unsigned)m.t_ms);
+                LOGI(TAG, "[%u ms] tick", (unsigned)m.t_ms);
             }
         }
     }

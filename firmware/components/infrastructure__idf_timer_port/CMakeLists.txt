@@ -1,8 +1,8 @@
 idf_component_register(
   SRCS
-  "logging_idf.c"
+  "timer_idf.c"
   INCLUDE_DIRS
   "."
   PRIV_REQUIRES
   ports
-  log)
+  esp_timer)

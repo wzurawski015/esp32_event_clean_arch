@@ -30,7 +30,7 @@
 #include <string.h>
 
 #include "core_ev.h"
-#include "esp_log.h"
+#include "ports/log_port.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
@@ -335,7 +335,7 @@ static void step(void)
             }
             else
             {
-                ESP_LOGW(TAG, "RGB init submit failed");
+                LOGW(TAG, "RGB init submit failed");
             }
             break;
 
@@ -346,7 +346,7 @@ static void step(void)
             bool    submitted = lcd_init_next_step(&dly, &finished);
             if (!submitted)
             {
-                ESP_LOGW(TAG, "LCD init submit failed");
+                LOGW(TAG, "LCD init submit failed");
                 break;
             }
             if (finished)
@@ -375,7 +375,7 @@ static void step(void)
             }
             else
             {
-                ESP_LOGW(TAG, "set DDRAM addr submit failed");
+                LOGW(TAG, "set DDRAM addr submit failed");
             }
         }
         break;
@@ -416,7 +416,7 @@ static void step(void)
                 }
                 else
                 {
-                    ESP_LOGW(TAG, "data chunk submit failed");
+                    LOGW(TAG, "data chunk submit failed");
                 }
             }
             else
@@ -445,7 +445,7 @@ static void task_ev(void* arg)
 
         if (m.src == EV_SRC_SYS && m.code == EV_SYS_START)
         {
-            ESP_LOGI(TAG, "LCD/RGB: start init");
+            LOGI(TAG, "LCD/RGB: start init");
             s_st = ST_RGB_INIT; /* przejdzie przez RGB (jeśli jest), potem LCD */
             step();
         }
@@ -471,15 +471,6 @@ static void task_ev(void* arg)
 /*  API sterownika                                                             */
 /* -------------------------------------------------------------------------- */
 
-/**
- * @brief Inicjalizacja drivera LCD1602RGB.
- * @param cfg  Wskaźnik na konfigurację (uchwyty I²C).
- *             cfg->dev_lcd – wymagany;  cfg->dev_rgb – *opcjonalny* (może być NULL).
- * @retval true  Pomyślnie zainicjalizowano kolejkę i utworzono task.
- * @retval false Błąd (brak LCD, problem z subskrypcją lub taskiem).
- *
- * @note Driver reaguje na EV_SYS_START – wywołaj publikację tego zdarzenia po starcie systemu.
- */
 bool lcd1602rgb_init(const lcd1602rgb_cfg_t* cfg)
 {
     if (!cfg || !cfg->dev_lcd)
@@ -504,19 +495,11 @@ bool lcd1602rgb_init(const lcd1602rgb_cfg_t* cfg)
     return true;
 }
 
-/**
- * @brief Ustawienie koloru podświetlenia RGB (0..255 na kanał).
- *        Jeśli RGB nie ma (NULL), wywołanie jest bezpiecznie ignorowane.
- */
 void lcd1602rgb_set_rgb(uint8_t r, uint8_t g, uint8_t b)
 {
     rgb_set(r, g, b);
 }
 
-/**
- * @brief Wpisanie tekstu do lokalnej ramki (ASCII 0x20..0x7E). '\n' kończy wiersz.
- *        Nie wysyła od razu do LCD – użyj lcd1602rgb_request_flush().
- */
 void lcd1602rgb_draw_text(uint8_t col, uint8_t row, const char* utf8)
 {
     if (!utf8)
@@ -535,10 +518,6 @@ void lcd1602rgb_draw_text(uint8_t col, uint8_t row, const char* utf8)
     s_dirty = true;
 }
 
-/**
- * @brief Zleć odświeżenie LCD treścią z lokalnej ramki (obie linie).
- *        Jeśli FSM jest zajęty – żądanie zostanie pominięte (ochrona przed reentrancją).
- */
 void lcd1602rgb_request_flush(void)
 {
     if (!s_dirty)

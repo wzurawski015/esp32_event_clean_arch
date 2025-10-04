@@ -3,7 +3,7 @@
  * @brief CLI: logrb (ring-buffer) + loglvl (poziomy logów) + opcjonalny REPL.
  */
 
-#include "sdkconfig.h"          // makra CONFIG_*
+#include "sdkconfig.h"
 #include "infra_log_rb.h"
 #include "ports/log_port.h"
 
@@ -20,7 +20,6 @@
 #include <string.h>
 #include <stdlib.h>
 #include <stdio.h>
-#include <stdbool.h>
 
 #define TAG "LOGCLI"
 
@@ -137,6 +136,8 @@ static int cmd_loglvl(int argc, char** argv)
 
 void infra_log_cli_register(void)
 {
+    esp_console_register_help_command();
+
     const esp_console_cmd_t cmd_logrb_desc = {
         .command = "logrb",
         .help    = "logrb stat|clear|dump [--limit N]|tail [N]",
@@ -170,17 +171,17 @@ void infra_log_cli_start_repl(void)
     repl_cfg.prompt = "esp> ";
 
 #if CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG
-    // Preferowany REPL dla ESP32-C6 – ten sam port co idf_monitor
+    // USB-Serial-JTAG tylko jeśli konsola w Kconfig jest ustawiona na USB.
     esp_console_dev_usb_serial_jtag_config_t dev_cfg = ESP_CONSOLE_DEV_USB_SERIAL_JTAG_CONFIG_DEFAULT();
     ESP_ERROR_CHECK(esp_console_new_repl_usb_serial_jtag(&dev_cfg, &repl_cfg, &repl));
     infra_log_cli_register();
     ESP_ERROR_CHECK(esp_console_start_repl(repl));
     LOGI(TAG, "USB-Serial-JTAG REPL started — wpisz komendy (np. 'logrb stat').");
 #else
-    // Fallback: UART0
+    // Fallback: UART0 (to jest tryb dla Twojej płytki/konfiguracji)
     esp_console_dev_uart_config_t uart_cfg = ESP_CONSOLE_DEV_UART_CONFIG_DEFAULT();
     uart_cfg.channel     = UART_NUM_0;
-    uart_cfg.tx_gpio_num = -1;  // domyślne piny UART0
+    uart_cfg.tx_gpio_num = -1;
     uart_cfg.rx_gpio_num = -1;
     uart_cfg.baud_rate   = 115200;
 
@@ -191,7 +192,6 @@ void infra_log_cli_start_repl(void)
 #endif
 
 #else
-    // REPL nie jest uruchamiany z Kconfig – tylko rejestrujemy komendy
     infra_log_cli_register();
     LOGI(TAG, "registered CLI (REPL not started; CONFIG_INFRA_LOG_CLI_START_REPL=n)");
 #endif

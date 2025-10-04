@@ -1,0 +1,33 @@
+menu "Infrastructure logging"
+
+choice INFRA_LOG_LEVEL
+    prompt "Globalny poziom logowania"
+    default INFRA_LOG_LEVEL_VERBOSE
+
+config INFRA_LOG_LEVEL_ERROR
+    bool "ERROR"
+
+config INFRA_LOG_LEVEL_WARN
+    bool "WARN"
+
+config INFRA_LOG_LEVEL_INFO
+    bool "INFO"
+
+config INFRA_LOG_LEVEL_DEBUG
+    bool "DEBUG"
+
+config INFRA_LOG_LEVEL_VERBOSE
+    bool "VERBOSE"
+endchoice
+
+config INFRA_LOG_RINGBUF
+    bool "Włącz ring-buffer loggera (ostatnie N wpisów w RAM)"
+    default n
+
+config INFRA_LOG_RINGBUF_KB
+    int "Rozmiar ring-buffer (KB)"
+    depends on INFRA_LOG_RINGBUF
+    range 4 64
+    default 8
+
+endmenu

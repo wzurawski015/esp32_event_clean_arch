@@ -5,7 +5,7 @@
 #include <stdio.h>
 
 #include "core_ev.h"
-#include "esp_log.h"
+#include "ports/log_port.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "services_ds18b20_ev.h"
@@ -37,11 +37,11 @@ void app_main(void)
             {
                 int   milliC = (int)m.a0;
                 float C      = milliC / 1000.0f;
-                ESP_LOGI(TAG, "Temperatura: %.3f C", C);
+                LOGI(TAG, "Temperatura: %.3f C", C);
             }
             else if (m.src == EV_SRC_DS18 && m.code == EV_DS18_ERROR)
             {
-                ESP_LOGW(TAG, "Błąd DS18B20: %ld", (long)m.a0);
+                LOGW(TAG, "Błąd DS18B20: %ld", (long)m.a0);
             }
         }
     }

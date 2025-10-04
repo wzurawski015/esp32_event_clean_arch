@@ -28,6 +28,7 @@ export TARGET=esp32c6
 # 1a) Budowa i flash (auto-wykrycie portu)
 ./scripts/idf.sh fullclean && ./scripts/build.sh && ESPPORT=$(./scripts/find-port.sh) ./scripts/flash-monitor.sh
 # alternatywnie od razu na nowszym obrazie:
+sudo rm -rf firmware/projects/demo_lcd_rgb/build
 ./scripts/idf.sh fullclean && IDF_IMAGE=esp32-idf:5.5.1 ESPPORT=$(./scripts/find-port.sh) ./scripts/flash-monitor.sh
 
 # 2) Konfiguracja (menuconfig)

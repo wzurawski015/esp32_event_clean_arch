@@ -23,11 +23,42 @@ endchoice
 config INFRA_LOG_RINGBUF
     bool "Włącz ring-buffer loggera (ostatnie N wpisów w RAM)"
     default n
+    help
+      Gdy włączone, logi są dodatkowo buforowane w RAM (circular).
+      Pozwala na snapshot/tail/clear przez API lub komendę CLI.
 
 config INFRA_LOG_RINGBUF_KB
     int "Rozmiar ring-buffer (KB)"
     depends on INFRA_LOG_RINGBUF
     range 4 64
     default 8
+    help
+      Pojemność bufora w kilobajtach (zalecane: 8..32 KB).
+
+# =================== CLI (opcjonalnie, zależne od ring-bufora) ===================
+
+config INFRA_LOG_CLI
+    bool "Komenda konsolowa 'logrb' (ESP-IDF console)"
+    depends on INFRA_LOG_RINGBUF
+    default n
+    help
+      Rejestruje komendę 'logrb' (stat/clear/dump/tail), dostępną
+      w esp_console REPL (np. przez idf_monitor lub UART).
+
+config INFRA_LOG_CLI_START_REPL
+    bool "Uruchom REPL UART na starcie (użyj UART0)"
+    depends on INFRA_LOG_CLI
+    default n
+    help
+      Gdy włączone, startuje esp_console REPL na UART0.
+      Wtedy w monitorze (idf.py monitor) można wpisywać komendy 'logrb ...'.
+
+config INFRA_LOG_CLI_TAIL_DEFAULT
+    int "Domyślny rozmiar tail (bajty)"
+    depends on INFRA_LOG_CLI
+    range 128 65536
+    default 1024
+    help
+      Domyślna liczba bajtów dla 'logrb tail' (gdy nie podano N).
 
 endmenu

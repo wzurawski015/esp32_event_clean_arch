@@ -1,6 +1,6 @@
 /**
  * @file logging_cli.h
- * @brief Rejestracja komendy `logrb` i (opcjonalnie) start UART REPL.
+ * @brief Rejestracja komend CLI i (opcjonalnie) start REPL.
  */
 #pragma once
 
@@ -8,10 +8,10 @@
 extern "C" {
 #endif
 
-/** @brief Rejestruje komendę `logrb` w esp_console. */
+/** Rejestruje komendy CLI (logrb / loglvl). */
 void infra_log_cli_register(void);
 
-/** @brief Startuje REPL UART (jeśli włączone w Kconfig); w przeciwnym razie no-op. */
+/** Startuje REPL (USB-Serial-JTAG jeśli włączone w Kconfig; inaczej UART0). */
 void infra_log_cli_start_repl(void);
 
 #ifdef __cplusplus

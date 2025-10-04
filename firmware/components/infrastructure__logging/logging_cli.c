@@ -1,25 +1,9 @@
 /**
  * @file logging_cli.c
- * @brief CLI: logrb (ring-buffer) + loglvl (poziomy logów) + opcjonalny REPL UART.
- *
- * @details
- *  - W Kconfig włącz \c CONFIG_INFRA_LOG_CLI, by zarejestrować komendy:
- *        \code
- *        logrb  stat | clear | dump [--limit N] | tail [N]
- *        loglvl <TAG|*> <E|W|I|D|V>
- *        \endcode
- *  - Włącz \c CONFIG_INFRA_LOG_CLI_START_REPL, by uruchomić REPL na UART0 (115200).
- *
- * @dot
- * digraph CLI {
- *   rankdir=LR; node [shape=box, fontsize=10];
- *   Host -> "idf_monitor/REPL" -> "esp_console" -> "cmd_logrb()" -> "infra_log_rb_*()";
- *   "esp_console" -> "cmd_loglvl()" -> "esp_log_level_set()";
- * }
- * @enddot
+ * @brief CLI: logrb (ring-buffer) + loglvl (poziomy logów) + opcjonalny REPL.
  */
 
-#include "sdkconfig.h"          // makra CONFIG_*
+#include "sdkconfig.h"
 #include "infra_log_rb.h"
 #include "ports/log_port.h"
 
@@ -30,6 +14,9 @@
 #include "esp_log.h"
 #include "esp_vfs_dev.h"
 #include "driver/uart.h"
+#if CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG
+#include "esp_console_usb_serial_jtag.h"
+#endif
 #include <string.h>
 #include <stdlib.h>
 #include <stdio.h>
@@ -149,6 +136,8 @@ static int cmd_loglvl(int argc, char** argv)
 
 void infra_log_cli_register(void)
 {
+    esp_console_register_help_command();
+
     const esp_console_cmd_t cmd_logrb_desc = {
         .command = "logrb",
         .help    = "logrb stat|clear|dump [--limit N]|tail [N]",
@@ -179,18 +168,29 @@ void infra_log_cli_start_repl(void)
 
     esp_console_repl_config_t repl_cfg = ESP_CONSOLE_REPL_CONFIG_DEFAULT();
     repl_cfg.max_cmdline_length = 256;
+    repl_cfg.prompt = "esp> ";
 
+#if CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG
+    // USB-Serial-JTAG tylko jeśli konsola w Kconfig jest ustawiona na USB.
+    esp_console_dev_usb_serial_jtag_config_t dev_cfg = ESP_CONSOLE_DEV_USB_SERIAL_JTAG_CONFIG_DEFAULT();
+    ESP_ERROR_CHECK(esp_console_new_repl_usb_serial_jtag(&dev_cfg, &repl_cfg, &repl));
+    infra_log_cli_register();
+    ESP_ERROR_CHECK(esp_console_start_repl(repl));
+    LOGI(TAG, "USB-Serial-JTAG REPL started — wpisz komendy (np. 'logrb stat').");
+#else
+    // Fallback: UART0 (to jest tryb dla Twojej płytki/konfiguracji)
     esp_console_dev_uart_config_t uart_cfg = ESP_CONSOLE_DEV_UART_CONFIG_DEFAULT();
     uart_cfg.channel     = UART_NUM_0;
-    uart_cfg.tx_gpio_num = -1;  // domyślne piny UART0
+    uart_cfg.tx_gpio_num = -1;
     uart_cfg.rx_gpio_num = -1;
     uart_cfg.baud_rate   = 115200;
 
     ESP_ERROR_CHECK(esp_console_new_repl_uart(&uart_cfg, &repl_cfg, &repl));
     infra_log_cli_register();
     ESP_ERROR_CHECK(esp_console_start_repl(repl));
+    LOGI(TAG, "UART REPL started — wpisz komendy (np. 'logrb stat').");
+#endif
 
-    LOGI(TAG, "UART REPL started — wpisz 'logrb …' lub 'loglvl <TAG|*> <E|W|I|D|V>'");
 #else
     infra_log_cli_register();
     LOGI(TAG, "registered CLI (REPL not started; CONFIG_INFRA_LOG_CLI_START_REPL=n)");

@@ -135,13 +135,10 @@ bool app_demo_lcd_start(void)
         return false;
     }
 
-    // CLI (opcjonalnie)
+    // REPL uruchamiamy tylko raz w systemie (robi to np. app__log_bus / main).
+    // Tutaj co najwyżej rejestrujemy komendy.
 #if CONFIG_INFRA_LOG_CLI
-  #if CONFIG_INFRA_LOG_CLI_START_REPL
-    infra_log_cli_start_repl();
-  #else
     infra_log_cli_register();
-  #endif
 #endif
 
     // Zadanie-aktor z pętlą zdarzeń

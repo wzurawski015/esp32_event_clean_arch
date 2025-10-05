@@ -4,10 +4,9 @@
 #include "core/leasepool.h"
 #include "ports/log_port.h"
 
-#include "idf_i2c_port.h"
+#include "idf_i2c_port.h"                 // i2c_bus_create/probe/add
 #include "services_i2c.h"
 #include "lcd1602rgb_dfr_async.h"
-//#include "app_log_bus.h"            // <-- EV_LOG_NEW
 
 #include "sdkconfig.h"
 #include "freertos/FreeRTOS.h"
@@ -48,7 +47,7 @@ static void scan_log_and_pick_addrs(i2c_bus_t* bus, uint8_t* out_lcd, uint8_t* o
     if (!got_rgb) *out_rgb = (uint8_t)CONFIG_APP_RGB_ADDR;
 }
 
-// Skraca linię do 16 kolumn (LCD 16x2)
+// Pomocnicze: skraca linię do 16 kolumn (LCD 16x2)
 static void lcd_print_line16(uint8_t row, const char* s, size_t len)
 {
     char tmp[17];
@@ -85,29 +84,14 @@ static void app_demo_lcd_task(void* arg)
             continue;
         }
 
-        // 2) Reaktywne logi (lease) → pokaż ogon bieżącej linii na dolnym wierszu
-        if (m.src == EV_SRC_LOG && m.code == EV_LOG_NEW) {
-            // Uchwyt (idx|gen) jest w m.a, długość w m.b (dopóki nie mamy EV_PAYLOAD_LEASE)
-            lp_handle_t h = lp_unpack_u32(m.a);   // helper dostarczony w leasepool.h
-            lp_view_t   v;
-            if (lp_acquire(h, &v)) {
-                // Wyświetl ostatnie 16 znaków
-                size_t len = v.len;
-                const char* p = (const char*)v.ptr;
-                const char* start = p;
-                if (len > 16) start = p + (len - 16);
-                lcd_print_line16(1, start, len > 16 ? 16 : len);
-                lcd1602rgb_request_flush();
-                lp_release(h);
-            }
-            continue;
-        }
-
-        // 3) Diagnostyczne „tyknięcie” (ciche przy poziomie INFO, bo LOGD)
+        // 2) Diagnostyczne „tyknięcie” (ciche przy poziomie INFO, bo LOGD)
         if (m.src == EV_SRC_TIMER && m.code == EV_TICK_1S) {
             LOGD(TAG, "[%u ms] tick", (unsigned)m.t_ms);
             continue;
         }
+
+        // UWAGA: Reaktywne logi (LEASE) będą tu włączone, gdy dodamy EV_SRC_LOG + ev_post_lease().
+        // (celowo wyłączone teraz, by projekt kompilował się na obecnym core__ev)
     }
 }
 

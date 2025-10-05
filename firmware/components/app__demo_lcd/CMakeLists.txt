@@ -1,4 +1,3 @@
-# firmware/components/app__demo_lcd/CMakeLists.txt
 idf_component_register(
   SRCS "app_demo_lcd.c"
   INCLUDE_DIRS "include"
@@ -11,5 +10,5 @@ idf_component_register(
     ports
   PRIV_REQUIRES
     freertos
-    app__log_bus    # <--- DODANE: bo app_demo_lcd.c #include "app_log_bus.h"
+    app__log_bus
 )

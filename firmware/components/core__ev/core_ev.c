@@ -5,7 +5,7 @@
 #include "freertos/task.h"
 
 #ifndef EV_MAX_SUBS
-#define EV_MAX_SUBS  12   // maks. liczba subskrybentów busa
+#define EV_MAX_SUBS  12
 #endif
 
 typedef struct {
@@ -40,7 +40,7 @@ static uint16_t ev_broadcast(const ev_msg_t* m)
 {
     uint16_t delivered = 0;
 
-    // Szybka kopia subskrybentów pod lokalny snapshot (bez blokowania enqueue)
+    // Snapshot listy subskrybentów (krótka sekcja krytyczna)
     EV_CS_ENTER();
     uint16_t n = s_subs_cnt;
     ev_sub_t local[EV_MAX_SUBS];
@@ -64,11 +64,11 @@ void ev_init(void)
 {
     EV_CS_ENTER();
     memset(s_subs, 0, sizeof(s_subs));
-    s_subs_cnt   = 0;
-    s_q_depth_max= 0;
-    s_posts_ok   = 0;
-    s_posts_drop = 0;
-    s_enq_fail   = 0;
+    s_subs_cnt    = 0;
+    s_q_depth_max = 0;
+    s_posts_ok    = 0;
+    s_posts_drop  = 0;
+    s_enq_fail    = 0;
     EV_CS_EXIT();
 }
 
@@ -77,7 +77,7 @@ bool ev_subscribe(ev_queue_t* out_q, size_t depth)
     if (!out_q) return false;
     if (depth == 0) depth = 8;
 
-    ev_queue_t q = xQueueCreate((UBaseType)depth, sizeof(ev_msg_t));
+    ev_queue_t q = xQueueCreate((UBaseType_t)depth, sizeof(ev_msg_t));
     if (q == NULL) return false;
 
     bool attached = false;
@@ -120,7 +120,7 @@ bool ev_post(ev_src_t src, uint16_t code, uint32_t a0, uint32_t a1)
 
 bool ev_post_lease(ev_src_t src, uint16_t code, lp_handle_t h, uint16_t len)
 {
-    // Spakuj uchwyt do pól a0/a1 (kompatybilne z istniejącym ev_msg_t)
+    // Spakuj uchwyt do pól a0/a1
     ev_msg_t m = {
         .src  = src,
         .code = code,
@@ -154,7 +154,7 @@ void ev_get_stats(ev_stats_t* out)
     out->subs        = s_subs_cnt;
     out->q_depth_max = s_q_depth_max;
     EV_CS_EXIT();
-    out->posts_ok  = s_posts_ok;
-    out->posts_drop= s_posts_drop;
-    out->enq_fail  = s_enq_fail;
+    out->posts_ok    = s_posts_ok;
+    out->posts_drop  = s_posts_drop;
+    out->enq_fail    = s_enq_fail;
 }

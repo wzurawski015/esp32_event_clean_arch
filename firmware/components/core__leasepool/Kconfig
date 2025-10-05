@@ -1,0 +1,10 @@
+menu "Core: Lease Pool"
+config LP_NUM_SLOTS
+    int "Number of lease slots"
+    range 8 512
+    default 32
+config LP_BUF_SIZE
+    int "Payload size per slot (bytes)"
+    range 64 4096
+    default 256
+endmenu

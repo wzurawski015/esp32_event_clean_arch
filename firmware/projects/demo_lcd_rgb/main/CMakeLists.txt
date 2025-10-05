@@ -3,12 +3,15 @@ idf_component_register(
     INCLUDE_DIRS "."
     REQUIRES
         core__ev
+        core__leasepool       # +++ nowa zależność (lease-pool)
         ports
         services__timer
         services__i2c
         infrastructure__idf_i2c_port
         drivers__lcd1602rgb_dfr_async
         infrastructure__logging
+        app__log_bus          # +++ nowa zależność (most log->EV)
+        app__demo_lcd         # +++ nowa zależność (aktor LCD)
 )
 
 # (Opcjonalnie) jeśli używasz komendy 'logrb' (esp_console):

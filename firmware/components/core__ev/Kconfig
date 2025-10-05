@@ -1,0 +1,8 @@
+menu "Core EV (event bus)"
+config CORE_EV_MAX_SUBS
+    int "Max number of event subscribers"
+    range 1 64
+    default 12
+    help
+      Maksymalna liczba subskrybentów event-busa.
+endmenu

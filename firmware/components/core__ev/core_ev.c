@@ -4,8 +4,9 @@
 #include "freertos/portmacro.h"
 #include "freertos/task.h"
 
-#ifndef EV_MAX_SUBS
-#define EV_MAX_SUBS  12
+/* Jedno źródło prawdy dla EV_MAX_SUBS jest w core_ev.h — tutaj bez fallbacków. */
+#if (EV_MAX_SUBS < 1)
+#  error "EV_MAX_SUBS must be >= 1"
 #endif
 
 typedef struct {
@@ -13,21 +14,21 @@ typedef struct {
     uint16_t   depth;
 } ev_sub_t;
 
-static ev_sub_t s_subs[EV_MAX_SUBS];
-static uint16_t s_subs_cnt;
-static uint16_t s_q_depth_max;
+static ev_sub_t  s_subs[EV_MAX_SUBS];
+static uint16_t  s_subs_cnt;
+static uint16_t  s_q_depth_max;
 
-static uint32_t s_posts_ok;
-static uint32_t s_posts_drop;
-static uint32_t s_enq_fail;
+static uint32_t  s_posts_ok;
+static uint32_t  s_posts_drop;
+static uint32_t  s_enq_fail;
 
 #if defined(portMUX_INITIALIZER_UNLOCKED)
 static portMUX_TYPE s_ev_mux = portMUX_INITIALIZER_UNLOCKED;
-#define EV_CS_ENTER()      portENTER_CRITICAL(&s_ev_mux)
-#define EV_CS_EXIT()       portEXIT_CRITICAL(&s_ev_mux)
+#  define EV_CS_ENTER()      portENTER_CRITICAL(&s_ev_mux)
+#  define EV_CS_EXIT()       portEXIT_CRITICAL(&s_ev_mux)
 #else
-#define EV_CS_ENTER()      taskENTER_CRITICAL()
-#define EV_CS_EXIT()       taskEXIT_CRITICAL()
+#  define EV_CS_ENTER()      taskENTER_CRITICAL()
+#  define EV_CS_EXIT()       taskEXIT_CRITICAL()
 #endif
 
 static inline uint32_t now_ms(void)
@@ -35,12 +36,12 @@ static inline uint32_t now_ms(void)
     return (uint32_t)(xTaskGetTickCount() * portTICK_PERIOD_MS);
 }
 
-// Wysyła ramkę do wszystkich subów; zwraca liczbę rzeczywistych dostarczeń
+/* Wysyła ramkę do wszystkich subów; zwraca liczbę rzeczywistych dostarczeń */
 static uint16_t ev_broadcast(const ev_msg_t* m)
 {
     uint16_t delivered = 0;
 
-    // Snapshot listy subskrybentów (krótka sekcja krytyczna)
+    /* Snapshot listy subskrybentów (krótka sekcja krytyczna) */
     EV_CS_ENTER();
     uint16_t n = s_subs_cnt;
     ev_sub_t local[EV_MAX_SUBS];
@@ -50,10 +51,11 @@ static uint16_t ev_broadcast(const ev_msg_t* m)
 
     for (uint16_t i = 0; i < n; ++i) {
         if (local[i].q == NULL) continue;
-        BaseType_t ok = xQueueSend(local[i].q, m, 0); // NIE blokujemy
+        BaseType_t ok = xQueueSend(local[i].q, m, 0); // NIE blokujemy producenta
         if (ok == pdTRUE) {
             delivered++;
         } else {
+            /* kolejka subskrybenta pełna */
             s_enq_fail++;
         }
     }
@@ -120,7 +122,7 @@ bool ev_post(ev_src_t src, uint16_t code, uint32_t a0, uint32_t a1)
 
 bool ev_post_lease(ev_src_t src, uint16_t code, lp_handle_t h, uint16_t len)
 {
-    // Spakuj uchwyt do pól a0/a1
+    /* Spakuj uchwyt do pól a0/a1 */
     ev_msg_t m = {
         .src  = src,
         .code = code,
@@ -131,11 +133,11 @@ bool ev_post_lease(ev_src_t src, uint16_t code, lp_handle_t h, uint16_t len)
 
     uint16_t delivered = ev_broadcast(&m);
 
-    // Podbij refcount o realny fan-out...
+    /* Podbij refcount o realny fan-out... */
     if (delivered > 0) {
         lp_addref_n(h, delivered);
     }
-    // ...a następnie ZAWSZE zwolnij referencję producenta
+    /* ...a następnie ZAWSZE zwolnij referencję producenta */
     lp_release(h);
 
     if (delivered > 0) {

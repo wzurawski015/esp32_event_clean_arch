@@ -1,10 +1,23 @@
+/**
+ * @file core_ev.h
+ * @brief Prosty, bezalokacyjny „event bus” oparty o FreeRTOS Queue.
+ *
+ * Model:
+ *  - Producent wywołuje ev_post(...) / ev_post_lease(...).
+ *  - Każdy aktor/subskrybent ma własną kolejkę (ev_subscribe()) i
+ *    odbiera komunikaty typu ev_msg_t.
+ *
+ * Zależności:
+ *  - FreeRTOS (kolejki)
+ *  - core/leasepool.h (dla wariantu ev_post_lease())
+ */
+
 #pragma once
+
+#include "sdkconfig.h"   // dla CONFIG_CORE_EV_MAX_SUBS
 #include <stdint.h>
 #include <stdbool.h>
-
-#ifdef __cplusplus
-extern "C" {
-#endif
+#include <stddef.h>
 
 // FreeRTOS kolejki dla subskrybentów
 #include "freertos/FreeRTOS.h"
@@ -13,13 +26,24 @@ extern "C" {
 // Lease (potrzebne do ev_post_lease)
 #include "core/leasepool.h"
 
-// Domyślny limit subskrybentów
-#ifndef EV_MAX_SUBS
-#define EV_MAX_SUBS 16
+#ifdef __cplusplus
+extern "C" {
 #endif
 
-// Źródła zdarzeń (rozszerzalne)
+/* ======= KONFIG: jedno źródło prawdy dla EV_MAX_SUBS ======= */
+/* Jeśli ustawisz w Kconfig: CONFIG_CORE_EV_MAX_SUBS, to ta wartość wygra.
+ * W innym wypadku obowiązuje sensowny domyślny limit 12. */
+#ifndef EV_MAX_SUBS
+#  ifdef CONFIG_CORE_EV_MAX_SUBS
+#    define EV_MAX_SUBS CONFIG_CORE_EV_MAX_SUBS
+#  else
+#    define EV_MAX_SUBS 12
+#  endif
+#endif
+
+/* ======= Źródła i kody zdarzeń (twoje dotychczasowe; rozszerzalne) ======= */
 typedef uint16_t ev_src_t;
+
 enum {
     EV_SRC_SYS   = 0x01,
     EV_SRC_TIMER = 0x02,
@@ -29,7 +53,6 @@ enum {
     EV_SRC_LOG   = 0x06,   // strumień logów (mostek vprintf->EV)
 };
 
-// Kody zdarzeń (zakresy per źródło)
 enum {
     // SYS
     EV_SYS_START     = 0x0001,
@@ -55,7 +78,7 @@ enum {
     EV_LOG_NEW       = 0x5000, // kompletna linia logu (payload: lease)
 };
 
-// Ramka zdarzenia (payload: a0/a1; czas dla wygody)
+/* ======= Ramka zdarzenia ======= */
 typedef struct {
     ev_src_t  src;
     uint16_t  code;
@@ -64,25 +87,29 @@ typedef struct {
     uint32_t  t_ms;   // timestamp (ms) – nadawany przy ev_post/ev_post_lease
 } ev_msg_t;
 
-// Kolejka zdarzeń aktora (alias na QueueHandle_t)
+/* Kolejka zdarzeń aktora (alias na QueueHandle_t) */
 typedef QueueHandle_t ev_queue_t;
 
-// Inicjalizacja busa
+/* ======= API ======= */
+
+/** Inicjalizacja busa. Czyści listę subskrybentów i liczniki. */
 void ev_init(void);
 
-// Subskrypcja: tworzy kolejkę o 'depth' i dopina do busa
+/** Subskrypcja: tworzy kolejkę o 'depth' i dopina do busa. */
 bool ev_subscribe(ev_queue_t* out_q, size_t depth);
 
-// Broadcast "klasycznego" zdarzenia
+/** Broadcast "klasycznego" zdarzenia (bez blokowania producenta). */
 bool ev_post(ev_src_t src, uint16_t code, uint32_t a0, uint32_t a1);
 
-// Broadcast zdarzenia z payloadem LEASE (zero-copy):
-// - bus podbija refcnt o liczbę rzeczywiście dostarczonych subów,
-// - ZAWSZE zdejmuje 1 referencję producenta,
-// - jeśli n_delivered == 0 → lease zostaje zwolniony tutaj.
+/**
+ * Broadcast zdarzenia z payloadem LEASE (zero‑copy):
+ * - bus podbija refcnt o liczbę rzeczywiście dostarczonych subów,
+ * - ZAWSZE zdejmuje 1 referencję producenta,
+ * - jeśli n_delivered == 0 → lease zostaje zwolniony tutaj.
+ */
 bool ev_post_lease(ev_src_t src, uint16_t code, lp_handle_t h, uint16_t len);
 
-// Proste metryki busa
+/* Proste metryki busa */
 typedef struct {
     uint16_t subs;          // ilu subskrybentów
     uint32_t posts_ok;      // ile ev_post* z ≥1 dostarczeniem
@@ -90,6 +117,7 @@ typedef struct {
     uint32_t enq_fail;      // ile pojedynczych enqueue się nie zmieściło
     uint16_t q_depth_max;   // maksymalna głębokość kolejek subskrybentów
 } ev_stats_t;
+
 void ev_get_stats(ev_stats_t* out);
 
 #ifdef __cplusplus

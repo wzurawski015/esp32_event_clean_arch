@@ -1,3 +1,4 @@
+// firmware/components/core__leasepool/leasepool.c
 #include "core/leasepool.h"
 #include <string.h>
 #include "sdkconfig.h"
@@ -24,7 +25,7 @@ typedef struct {
 
 static lp_slot_t s_slots[LP_NUM_SLOTS] DMA_ATTR;
 static uint16_t  s_free[LP_NUM_SLOTS];
-static volatile uint16_t s_free_top; // stos wolnych slotów (liczba zajętych elementów)
+static volatile uint16_t s_free_top; // stos wolnych slotów (liczba elementów)
 static volatile uint32_t s_drops_alloc_fail;
 
 #if defined(portMUX_INITIALIZER_UNLOCKED)
@@ -39,6 +40,7 @@ static portMUX_TYPE s_mux = portMUX_INITIALIZER_UNLOCKED;
   #define CS_EXIT_ISR()   portEXIT_CRITICAL(&s_mux)
 #endif
 #else
+// awaryjnie (powinno być dostępne w IDF)
 #define CS_ENTER()      taskENTER_CRITICAL()
 #define CS_EXIT()       taskEXIT_CRITICAL()
 #define CS_ENTER_ISR()  CS_ENTER()
@@ -46,6 +48,7 @@ static portMUX_TYPE s_mux = portMUX_INITIALIZER_UNLOCKED;
 #endif
 
 static inline bool lp_valid_idx(uint16_t idx) { return idx < LP_NUM_SLOTS; }
+
 static inline bool lp_valid_handle(lp_handle_t h) {
     return lp_valid_idx(h.idx) && (s_slots[h.idx].gen == h.gen);
 }
@@ -67,28 +70,32 @@ bool lp_init(void)
 
 static inline lp_handle_t lp_alloc_try_impl(uint32_t want_len, bool isr)
 {
-    lp_handle_t h = { .idx = LP_INVALID_IDX, .gen = 0 };
+    lp_handle_t h = (lp_handle_t){ .idx = LP_INVALID_IDX, .gen = 0 };
     if (want_len > LP_BUF_SIZE) {
-        return h; // payload większy niż slot -> invalid
+        // payload większy niż slot -> invalid
+        return h;
     }
-
     if (!isr) { CS_ENTER(); } else { CS_ENTER_ISR(); }
+
     if (s_free_top == 0) {
         if (!isr) { CS_EXIT(); } else { CS_EXIT_ISR(); }
         s_drops_alloc_fail++;
         return h;
     }
+
     uint16_t idx = s_free[--s_free_top];
     s_slots[idx].refcnt = 1; // producent trzyma 1 ref do czasu rozgłoszenia
-    s_slots[idx].len = 0;
+    s_slots[idx].len    = 0;
+
     h.idx = idx;
     h.gen = s_slots[idx].gen;
+
     if (!isr) { CS_EXIT(); } else { CS_EXIT_ISR(); }
     return h;
 }
 
-lp_handle_t lp_alloc_try(uint32_t want_len)      { return lp_alloc_try_impl(want_len, false); }
-lp_handle_t lp_alloc_try_isr(uint32_t want_len)  { return lp_alloc_try_impl(want_len, true);  }
+lp_handle_t lp_alloc_try(uint32_t want_len)     { return lp_alloc_try_impl(want_len, false); }
+lp_handle_t lp_alloc_try_isr(uint32_t want_len) { return lp_alloc_try_impl(want_len, true);  }
 
 static inline bool lp_commit_impl(lp_handle_t h, uint32_t len, bool isr)
 {
@@ -100,7 +107,6 @@ static inline bool lp_commit_impl(lp_handle_t h, uint32_t len, bool isr)
     s_slots[h.idx].len = len;
     if (!isr) { CS_EXIT(); } else { CS_EXIT_ISR(); }
     __asm__ __volatile__ ("" ::: "memory"); // bariera po publikacji len
-
     return true;
 }
 
@@ -133,6 +139,7 @@ static inline void lp_release_impl(lp_handle_t h, bool isr)
 {
     if (!lp_valid_idx(h.idx)) return;
     if (!isr) { CS_ENTER(); } else { CS_ENTER_ISR(); }
+
     lp_slot_t* s = &s_slots[h.idx];
     if (s->gen == h.gen && s->refcnt > 0) {
         s->refcnt--;
@@ -142,6 +149,7 @@ static inline void lp_release_impl(lp_handle_t h, bool isr)
             s_free[s_free_top++] = h.idx; // oddaj slot na stos wolnych
         }
     }
+
     if (!isr) { CS_EXIT(); } else { CS_EXIT_ISR(); }
 }
 

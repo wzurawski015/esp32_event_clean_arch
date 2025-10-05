@@ -13,6 +13,8 @@ sudo rm -f  /home/wz/esp32_event_clean_arch/firmware/projects/demo_lcd_rgb/sdkco
 TARGET=esp32c6 CONSOLE=uart   ESPPORT=$(/home/wz/esp32_event_clean_arch/scripts/find-port.sh)   /home/wz/esp32_event_clean_arch/scripts/flash-monitor.sh
 TARGET=esp32c6 CONSOLE=uart   ESPPORT=$(scripts/find-port.sh)   scripts/flash-monitor.sh
 
+# Po zmianie defaults wykonaj raz build z resetem, żeby sdkconfig został odtworzony z nowych warstw:
+RESET_SDKCONFIG=1 TARGET=esp32c6 CONSOLE=uart scripts/flash-monitor.sh
 
 ### 0.A 60 s do startu (Docker, zalecane)
 ```bash

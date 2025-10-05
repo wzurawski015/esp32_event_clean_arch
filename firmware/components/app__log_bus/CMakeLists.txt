@@ -4,6 +4,8 @@ idf_component_register(
     REQUIRES
         core__ev
         core__leasepool
+        infrastructure__logging
         ports
-        log
+    PRIV_REQUIRES
+        freertos
 )

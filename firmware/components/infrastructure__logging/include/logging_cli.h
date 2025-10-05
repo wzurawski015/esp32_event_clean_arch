@@ -1,6 +1,6 @@
 /**
  * @file logging_cli.h
- * @brief Rejestracja komend CLI i (opcjonalnie) start REPL — wersja idempotentna.
+ * @brief Rejestracja komend CLI i (opcjonalnie) start REPL.
  */
 #pragma once
 
@@ -11,15 +11,14 @@ extern "C" {
 #include "esp_err.h"
 
 /**
- * Rejestruje komendy CLI („logrb”, „loglvl”) w sposób idempotentny.
+ * @brief Rejestruje komendy CLI („logrb”, „loglvl”) w sposób idempotentny.
  * Powtórne wywołanie zwraca ESP_OK i nic nie robi.
  */
 esp_err_t infra_log_cli_register(void);
 
 /**
- * Startuje REPL (USB-Serial-JTAG jeśli włączone; inaczej UART) w sposób
- * idempotentny i „miękki”. Jeżeli REPL już działa albo driver UART
- * jest zajęty — zwraca ESP_OK bez abortu.
+ * @brief Startuje UART/USB REPL w sposób idempotentny/miękki (bez abortu).
+ * Jeśli REPL już działa lub driver jest zajęty, zwraca ESP_OK.
  */
 esp_err_t infra_log_cli_start_repl(void);
 

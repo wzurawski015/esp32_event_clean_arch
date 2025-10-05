@@ -10,5 +10,4 @@ idf_component_register(
     ports
   PRIV_REQUIRES
     freertos
-    app__log_bus
 )

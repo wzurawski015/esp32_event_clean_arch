@@ -1,9 +1,11 @@
 /**
  * @file logging_cli.c
- * @brief CLI: logrb (ring-buffer) + loglvl (poziomy logów) + idempotentny REPL.
+ * @brief CLI: logrb (ring-buffer) + loglvl (poziomy logów) + opcjonalny REPL.
  */
 
 #include "sdkconfig.h"
+#include "logging_cli.h"
+
 #include "infra_log_rb.h"
 #include "ports/log_port.h"
 
@@ -14,15 +16,16 @@
 #include "esp_log.h"
 #include "esp_vfs_dev.h"
 #include "driver/uart.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/semphr.h"
 #if CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG
 #include "esp_console_usb_serial_jtag.h"
 #endif
+
 #include <string.h>
 #include <stdlib.h>
 #include <stdio.h>
 #include <stdbool.h>
-#include "freertos/FreeRTOS.h"
-#include "freertos/semphr.h"
 
 #define TAG "LOGCLI"
 
@@ -135,7 +138,7 @@ static int cmd_loglvl(int argc, char** argv)
     return 0;
 }
 
-/* ============== idempotentna rejestracja komend ============== */
+/* ==================== rejestracja CLI (idempotentna) ==================== */
 
 static bool s_cmds_registered = false;
 
@@ -146,38 +149,38 @@ esp_err_t infra_log_cli_register(void)
         return ESP_OK;
     }
 
-    esp_console_register_help_command();
+    // help – również „miękko”
+    ESP_ERROR_CHECK_WITHOUT_ABORT(esp_console_register_help_command());
 
     const esp_console_cmd_t cmd_logrb_desc = {
-        .command  = "logrb",
-        .help     = "logrb stat|clear|dump [--limit N]|tail [N]",
-        .hint     = NULL,
-        .func     = &cmd_logrb,
-        .argtable = NULL
+        .command = "logrb",
+        .help    = "logrb stat|clear|dump [--limit N]|tail [N]",
+        .hint    = NULL,
+        .func    = &cmd_logrb,
+        .argtable= NULL
     };
-    const esp_console_cmd_t cmd_loglvl_desc = {
-        .command  = "loglvl",
-        .help     = "loglvl <TAG|*> <E|W|I|D|V>  (zmień poziom logów w locie)",
-        .hint     = NULL,
-        .func     = &cmd_loglvl,
-        .argtable = NULL
-    };
-
-    // „Miękkie” rejestrowanie — bez abortu na duplikat
     ESP_ERROR_CHECK_WITHOUT_ABORT(esp_console_cmd_register(&cmd_logrb_desc));
+
+    const esp_console_cmd_t cmd_loglvl_desc = {
+        .command = "loglvl",
+        .help    = "loglvl <TAG|*> <E|W|I|D|V>  (zmień poziom logów w locie)",
+        .hint    = NULL,
+        .func    = &cmd_loglvl,
+        .argtable= NULL
+    };
     ESP_ERROR_CHECK_WITHOUT_ABORT(esp_console_cmd_register(&cmd_loglvl_desc));
 
     s_cmds_registered = true;
-    LOGI(TAG, "registered 'logrb' and 'loglvl' commands");
+    ESP_LOGI(TAG, "registered 'logrb' and 'loglvl' commands");
     return ESP_OK;
 }
 
-/* =================== idempotentny start REPL =================== */
+/* ========================== REPL (idempotentny/miękki) ========================= */
 
-static esp_console_repl_t* s_repl   = NULL;
+static esp_console_repl_t* s_repl = NULL;
 static SemaphoreHandle_t   s_cli_mux = NULL;
 
-static inline void init_cli_mutex_once(void)
+static inline void ensure_mux_(void)
 {
     if (!s_cli_mux) {
         s_cli_mux = xSemaphoreCreateMutex();
@@ -186,29 +189,27 @@ static inline void init_cli_mutex_once(void)
 
 esp_err_t infra_log_cli_start_repl(void)
 {
-    // Zadbaj, by komendy były dostępne nawet jeśli REPL nie wystartuje
-    infra_log_cli_register();
-
 #if !CONFIG_INFRA_LOG_CLI_START_REPL
-    LOGI(TAG, "registered CLI (REPL not started; CONFIG_INFRA_LOG_CLI_START_REPL=n)");
-    return ESP_OK;
+    // Rejestrujemy tylko komendy, bez odpalania REPL
+    return infra_log_cli_register();
 #else
-    init_cli_mutex_once();
+    ensure_mux_();
     if (!s_cli_mux) return ESP_ERR_NO_MEM;
 
     xSemaphoreTake(s_cli_mux, portMAX_DELAY);
 
-    if (s_repl) {
+    if (s_repl) {  // już działa
         xSemaphoreGive(s_cli_mux);
-        return ESP_OK; // już działa
+        return ESP_OK;
     }
 
+    // REPL konfiguracja
     esp_console_repl_config_t repl_cfg = ESP_CONSOLE_REPL_CONFIG_DEFAULT();
     repl_cfg.max_cmdline_length = 256;
-    repl_cfg.prompt             = "esp> ";
+    repl_cfg.prompt = "esp> ";
 
 #if CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG
-    // USB-Serial-JTAG
+    // USB-Serial-JTAG: nie używa sterownika UART
     esp_console_dev_usb_serial_jtag_config_t dev_cfg = ESP_CONSOLE_DEV_USB_SERIAL_JTAG_CONFIG_DEFAULT();
 
     esp_console_repl_t* repl = NULL;
@@ -218,6 +219,8 @@ esp_err_t infra_log_cli_start_repl(void)
         xSemaphoreGive(s_cli_mux);
         return err;
     }
+    // Zarejestruj komendy (idempotentnie)
+    infra_log_cli_register();
 
     err = esp_console_start_repl(repl);
     if (err != ESP_OK) {
@@ -225,29 +228,32 @@ esp_err_t infra_log_cli_start_repl(void)
         xSemaphoreGive(s_cli_mux);
         return err;
     }
-
     s_repl = repl;
-    LOGI(TAG, "USB-Serial-JTAG REPL started — wpisz komendy (np. 'logrb stat').");
+    ESP_LOGI(TAG, "USB-Serial-JTAG REPL started — wpisz komendy (np. 'logrb stat').");
     xSemaphoreGive(s_cli_mux);
     return ESP_OK;
 
 #else
-    // UART REPL
+    // UART REPL — „miękko” współdzieli się z innymi
     esp_console_dev_uart_config_t uart_cfg = ESP_CONSOLE_DEV_UART_CONFIG_DEFAULT();
-    // uart_cfg.channel/tx/rx/baud zostają z DEF; można nadpisać wg potrzeb.
-
-    uart_port_t cli_uart =
+    // Domyślny kanał, jeśli Kconfig nie podał innego
     #if defined(CONFIG_ESP_CONSOLE_UART_NUM)
-        (uart_port_t)CONFIG_ESP_CONSOLE_UART_NUM;
+        const uart_port_t cli_uart = (uart_port_t)CONFIG_ESP_CONSOLE_UART_NUM;
+        uart_cfg.channel = cli_uart;
     #else
-        UART_NUM_0;
+        const uart_port_t cli_uart = UART_NUM_0;
+        uart_cfg.channel = UART_NUM_0;
     #endif
+    // Pozostaw -1,-1 aby użyć domyślnych pinów konsoli
+    // uart_cfg.tx_gpio_num / rx_gpio_num pozostają z DEFAULT
 
-    // Jeśli driver UART jest już zajęty (ktoś inny wystartował REPL)
+    // Jeśli ktoś wcześniej zainstalował driver na tym porcie — nie startujemy drugiego REPL
     if (uart_is_driver_installed(cli_uart)) {
         ESP_LOGW(TAG, "UART driver already installed — skip starting second REPL");
+        // Komendy i tak są (lub zaraz będą) zarejestrowane:
+        infra_log_cli_register();
         xSemaphoreGive(s_cli_mux);
-        return ESP_OK; // miękka degradacja
+        return ESP_OK;
     }
 
     esp_console_repl_t* repl = NULL;
@@ -258,6 +264,9 @@ esp_err_t infra_log_cli_start_repl(void)
         return err;
     }
 
+    // Zarejestruj komendy (idempotentnie)
+    infra_log_cli_register();
+
     err = esp_console_start_repl(repl);
     if (err != ESP_OK) {
         ESP_LOGW(TAG, "esp_console_start_repl() failed: %s", esp_err_to_name(err));
@@ -266,16 +275,17 @@ esp_err_t infra_log_cli_start_repl(void)
     }
 
     s_repl = repl;
-    LOGI(TAG, "UART REPL started — wpisz komendy (np. 'logrb stat').");
+    ESP_LOGI(TAG, "UART REPL started — wpisz komendy (np. 'logrb stat').");
     xSemaphoreGive(s_cli_mux);
     return ESP_OK;
 #endif // CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG
+
 #endif // CONFIG_INFRA_LOG_CLI_START_REPL
 }
 
 #else   // !CONFIG_INFRA_LOG_CLI
 
-#include "esp_err.h"
+// Stuby kiedy CLI jest wyłączone w Kconfig — wygodnie dla użytkowników API
 esp_err_t infra_log_cli_register(void)   { return ESP_OK; }
 esp_err_t infra_log_cli_start_repl(void) { return ESP_OK; }
 

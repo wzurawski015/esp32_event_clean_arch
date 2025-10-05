@@ -11,3 +11,11 @@ idf_component_register(
   PRIV_REQUIRES
     freertos
 )
+
+# Jeżeli używasz CLI do logów, dołącz odpowiednie komponenty
+if(CONFIG_INFRA_LOG_CLI)
+  # Nagłówki i kod CLI (logging_cli.h / infra_log_cli_*)
+  idf_component_requires(${COMPONENT_LIB} infrastructure__logging)
+  # Runtime IDF konsoli (REPL, komendy)
+  target_link_libraries(${COMPONENT_LIB} PRIVATE idf::console)
+endif()

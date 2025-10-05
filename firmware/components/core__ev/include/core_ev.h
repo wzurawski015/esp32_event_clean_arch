@@ -1,100 +1,80 @@
-/**
- * @file core_ev.h
- * @brief Prosty event-bus (broadcast, pub/sub) dla Clean Architecture.
- *
- * Każdy subskrybent posiada własną kolejkę (QueueHandle_t). Eventy są
- * "broadcastowane" do wszystkich zarejestrowanych kolejek.
- *
- * Architektura i zasady:
- *  - ev_init() inicjalizuje mutex i listę subskrybentów
- *  - ev_subscribe() rejestruje kolejkę odbiorczą
- *  - ev_post() rozsyła zdarzenie do wszystkich zarejestrowanych kolejek
- *  - brak alokacji dynamicznej w hot-path (poza konstrukcją kolejek po stronie klienta)
- */
 #pragma once
-#include <stdbool.h>
 #include <stdint.h>
+#include <stdbool.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+// FreeRTOS kolejki dla subskrybentów
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
 
-#ifdef __cplusplus
-extern "C"
-{
-#endif
+// Lease (potrzebne do ev_post_lease)
+#include "core/leasepool.h"
 
-/** Maksymalna liczba subskrybentów (możesz zwiększyć wg potrzeb). */
-#ifndef EV_MAX_SUBS
-#define EV_MAX_SUBS 16
-#endif
+// Źródła zdarzeń (rozszerzalne)
+typedef uint16_t ev_src_t;
+enum {
+    EV_SRC_SYS   = 0x01,
+    EV_SRC_TIMER = 0x02,
+    EV_SRC_I2C   = 0x03,
+    EV_SRC_LCD   = 0x04,
+    EV_SRC_LOG   = 0x05,   // <--- NOWE: strumień logów
+};
 
-    /** Źródła zdarzeń (warstwa systemu) */
-    typedef enum
-    {
-        EV_SRC_SYS   = 1,  ///< Zdarzenia systemowe (start, itp.)
-        EV_SRC_TIMER = 2,  ///< Tiki zegarowe
-        EV_SRC_I2C   = 3,  ///< Wyniki operacji I2C (services__i2c)
-        EV_SRC_LCD   = 4,  ///< Sterownik LCD
-        EV_SRC_DS18  = 5,  ///< Serwis DS18B20
-    } ev_src_t;
+// Kody zdarzeń (zakresy per źródło)
+enum {
+    // SYS
+    EV_SYS_START = 0x0001,
 
-    /** Kody zdarzeń (per źródło) */
-    typedef enum
-    {
-        /* EV_SRC_SYS */
-        EV_SYS_START = 10,  ///< Aplikacja gotowa – komponenty mogą startować
+    // TIMER
+    EV_TICK_1S   = 0x1001,
 
-        /* EV_SRC_TIMER */
-        EV_TICK_100MS = 100,
-        EV_TICK_1S    = 101,
+    // LCD
+    EV_LCD_READY = 0x2001,
 
-        /* EV_SRC_I2C */
-        EV_I2C_DONE  = 200,  ///< Operacja I2C zakończona OK (a0=req*)
-        EV_I2C_ERROR = 201,  ///< Operacja I2C błąd (a0=req*, a1=esp_err_t)
+    // LOG
+    EV_LOG_NEW   = 0x3100, // <--- NOWE: kompletna linia logu
+};
 
-        /* EV_SRC_LCD */
-        EV_LCD_READY   = 300,  ///< LCD zainicjalizowany
-        EV_LCD_UPDATED = 301,  ///< Bufor wypchnięty
-        EV_LCD_ERROR   = 399,
+// Ramka zdarzenia (payload: a0/a1; czas dla wygody)
+typedef struct {
+    ev_src_t  src;
+    uint16_t  code;
+    uint32_t  a0;     // ogólny payload (np. packed lease handle)
+    uint32_t  a1;     // ogólny payload (np. length)
+    uint32_t  t_ms;   // timestamp (ms) – nadawany przy ev_post/ev_post_lease
+} ev_msg_t;
 
-        /* EV_SRC_DS18 */
-        EV_DS18_READY = 400,  ///< a0=(uintptr_t)int*(miliC) | float* – wg implementacji
-        EV_DS18_ERROR = 401,  ///< a0=kod błędu
-    } ev_code_t;
+// Kolejka zdarzeń aktora (alias na QueueHandle_t)
+typedef QueueHandle_t ev_queue_t;
 
-    /** Komunikat event-busa */
-    typedef struct
-    {
-        uint16_t  src;   ///< ev_src_t
-        uint16_t  code;  ///< ev_code_t
-        uintptr_t a0;    ///< argument 0 (np. wskaźnik na strukturę)
-        uintptr_t a1;    ///< argument 1 (np. kod błędu)
-        uint32_t  t_ms;  ///< znacznik czasu (ms od startu)
-    } ev_msg_t;
+// Inicjalizacja busa
+void ev_init(void);
 
-    /** Uchwyt kolejki subskrybenta */
-    typedef QueueHandle_t ev_queue_t;
+// Subskrypcja: tworzy kolejkę o 'depth' i dopina do busa
+// Zwraca true gdy OK.
+bool ev_subscribe(ev_queue_t* out_q, size_t depth);
 
-    /** Inicjalizacja event-busa. */
-    void ev_init(void);
+// Broadcast "klasycznego" zdarzenia
+bool ev_post(ev_src_t src, uint16_t code, uint32_t a0, uint32_t a1);
 
-    /**
-     * Subskrypcja – tworzysz własną kolejkę i rejestrujesz ją w ev-busie.
-     * @param[out] out_queue – zwracany uchwyt kolejki (utworzony w tej funkcji)
-     * @param[in]  queue_len – długość kolejki (liczba wiadomości)
-     * @return true jeżeli OK
-     */
-    bool ev_subscribe(ev_queue_t* out_queue, size_t queue_len);
+// Broadcast zdarzenia z payloadem LEASE (zero-copy):
+// - bus podbija refcnt o liczbę rzeczywiście dostarczonych subów,
+// - ZAWSZE zdejmuje 1 referencję producenta (nie trzeba wołać lp_release po stronie producenta),
+// - jeśli n_delivered == 0 → lease zostaje zwolniony tutaj.
+bool ev_post_lease(ev_src_t src, uint16_t code, lp_handle_t h, uint16_t len);
 
-    /**
-     * Rejestracja własnej kolejki (jeżeli sam już utworzyłeś QueueHandle_t).
-     * @param q istniejąca kolejka
-     * @return true jeżeli OK
-     */
-    bool ev_register_queue(ev_queue_t q);
-
-    /** Wypis zdarzenia do wszystkich subskrybentów (non-blocking: 0-tick send). */
-    bool ev_post(uint16_t src, uint16_t code, uintptr_t a0, uintptr_t a1);
+// (Opcjonalnie) proste metryki busa
+typedef struct {
+    uint16_t subs;          // ilu subskrybentów
+    uint32_t posts_ok;      // ile ev_post* z co najmniej 1 dostarczeniem
+    uint32_t posts_drop;    // ile ev_post* bez żadnego dostarczenia
+    uint32_t enq_fail;      // ile pojedynczych enqueue się nie zmieściło (kolejka full)
+    uint16_t q_depth_max;   // maksymalna głębokość jaką tworzyli subskrybenci
+} ev_stats_t;
+void ev_get_stats(ev_stats_t* out);
 
 #ifdef __cplusplus
 }

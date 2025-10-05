@@ -70,6 +70,24 @@ static inline lp_handle_t lp_unpack_handle_u32(uint32_t w)
 // Alias zgodny z użyciem w aktorach (np. app__demo_lcd)
 #define lp_unpack_u32 lp_unpack_handle_u32
 
+// --- Helpers: pack/unpack uchwytu do 32-bit (np. m.a/m.b w ev_msg_t)
+static inline uint32_t lp_pack_handle_u32(lp_handle_t h)
+{
+    return ((uint32_t)h.idx << 16) | (uint32_t)h.gen;
+}
+
+static inline lp_handle_t lp_unpack_handle_u32(uint32_t w)
+{
+    lp_handle_t h;
+    h.idx = (uint16_t)(w >> 16);
+    h.gen = (uint16_t)(w & 0xFFFFu);
+    return h;
+}
+
+// Alias zgodny ze skrótem używanym w aktorze:
+#define lp_unpack_u32 lp_unpack_handle_u32
+
+
 #ifdef __cplusplus
 }
 #endif

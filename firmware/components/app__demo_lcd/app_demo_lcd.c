@@ -47,7 +47,7 @@ static void scan_log_and_pick_addrs(i2c_bus_t* bus, uint8_t* out_lcd, uint8_t* o
     if (!got_rgb) *out_rgb = (uint8_t)CONFIG_APP_RGB_ADDR;
 }
 
-// Pomocnicze: skraca linię do 16 kolumn (LCD 16x2)
+// Skraca/podkłada spacjami do 16 kolumn (LCD 16x2)
 static void lcd_print_line16(uint8_t row, const char* s, size_t len)
 {
     char tmp[17];
@@ -84,20 +84,32 @@ static void app_demo_lcd_task(void* arg)
             continue;
         }
 
-        // 2) Diagnostyczne „tyknięcie” (ciche przy poziomie INFO, bo LOGD)
+        // 2) Reaktywne logi: pokaż ogon linii (ostatnie 16 znaków) w dolnym wierszu
+        if (m.src == EV_SRC_LOG && m.code == EV_LOG_NEW) {
+            lp_handle_t h = lp_unpack_handle_u32(m.a0);
+            lp_view_t   v;
+            if (lp_acquire(h, &v)) {
+                const char* p = (const char*)v.ptr;
+                size_t n = v.len;
+                const char* start = (n > 16) ? (p + (n - 16)) : p;
+                lcd_print_line16(1, start, (n > 16) ? 16 : n);
+                lcd1602rgb_request_flush();
+                lp_release(h);
+            }
+            continue;
+        }
+
+        // 3) Diagnostyczne „tyknięcie”
         if (m.src == EV_SRC_TIMER && m.code == EV_TICK_1S) {
             LOGD(TAG, "[%u ms] tick", (unsigned)m.t_ms);
             continue;
         }
-
-        // UWAGA: Reaktywne logi (LEASE) będą tu włączone, gdy dodamy EV_SRC_LOG + ev_post_lease().
-        // (celowo wyłączone teraz, by projekt kompilował się na obecnym core__ev)
     }
 }
 
 bool app_demo_lcd_start(void)
 {
-    // Magistrala I²C (korzysta z services__i2c)
+    // Magistrala I²C
     i2c_bus_cfg_t buscfg = {
         .sda_gpio               = CONFIG_APP_I2C_SDA,
         .scl_gpio               = CONFIG_APP_I2C_SCL,

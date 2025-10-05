@@ -7,7 +7,7 @@
 #include "idf_i2c_port.h"
 #include "services_i2c.h"
 #include "lcd1602rgb_dfr_async.h"
-#include "app_log_bus.h"            // <-- EV_LOG_NEW
+//#include "app_log_bus.h"            // <-- EV_LOG_NEW
 
 #include "sdkconfig.h"
 #include "freertos/FreeRTOS.h"

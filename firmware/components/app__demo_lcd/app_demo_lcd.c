@@ -4,9 +4,10 @@
 #include "core/leasepool.h"
 #include "ports/log_port.h"
 
-#include "idf_i2c_port.h"                 // i2c_bus_create/probe/add
+#include "idf_i2c_port.h"
 #include "services_i2c.h"
 #include "lcd1602rgb_dfr_async.h"
+#include "app_log_bus.h"            // <-- EV_LOG_NEW
 
 #include "sdkconfig.h"
 #include "freertos/FreeRTOS.h"
@@ -19,7 +20,7 @@
 static const char* TAG = "APP_DEMO_LCD";
 
 // Lokalne zasoby tego aktora
-static i2c_bus_t*   s_bus    = NULL;
+static i2c_bus_t*   s_bus     = NULL;
 static i2c_dev_t*   s_dev_lcd = NULL;
 static i2c_dev_t*   s_dev_rgb = NULL;
 static TaskHandle_t s_task    = NULL;
@@ -47,7 +48,7 @@ static void scan_log_and_pick_addrs(i2c_bus_t* bus, uint8_t* out_lcd, uint8_t* o
     if (!got_rgb) *out_rgb = (uint8_t)CONFIG_APP_RGB_ADDR;
 }
 
-// Pomocnicze: skraca linię do 16 kolumn (LCD 16x2)
+// Skraca linię do 16 kolumn (LCD 16x2)
 static void lcd_print_line16(uint8_t row, const char* s, size_t len)
 {
     char tmp[17];
@@ -85,9 +86,9 @@ static void app_demo_lcd_task(void* arg)
         }
 
         // 2) Reaktywne logi (lease) → pokaż ogon bieżącej linii na dolnym wierszu
-        if (m.src == EV_SRC_LOG && m.code == 0x3100 /*EV_LOG_NEW*/) {
-            // Uchwyt (idx|gen) jest w m.a, długość w m.b
-            lp_handle_t h = lp_unpack_u32(m.a);
+        if (m.src == EV_SRC_LOG && m.code == EV_LOG_NEW) {
+            // Uchwyt (idx|gen) jest w m.a, długość w m.b (dopóki nie mamy EV_PAYLOAD_LEASE)
+            lp_handle_t h = lp_unpack_u32(m.a);   // helper dostarczony w leasepool.h
             lp_view_t   v;
             if (lp_acquire(h, &v)) {
                 // Wyświetl ostatnie 16 znaków

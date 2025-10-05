@@ -8,8 +8,9 @@
 ---
 
 ## 0. Szybka ściąga (Cheat Sheet) — 60 sekund do startu
-sudo rm -rf /home/wz/esp32_event_clean_arch/firmware/projects/demo_lcd_rgb/build
-sudo rm -f  /home/wz/esp32_event_clean_arch/firmware/projects/demo_lcd_rgb/sdkconfig
+rm -rf /home/wz/esp32_event_clean_arch/firmware/projects/demo_lcd_rgb/build
+rm -f  /home/wz/esp32_event_clean_arch/firmware/projects/demo_lcd_rgb/sdkconfig
+rm -rf /home/wz/esp32_event_clean_arch/.idf-docker-home
 TARGET=esp32c6 CONSOLE=uart   ESPPORT=$(/home/wz/esp32_event_clean_arch/scripts/find-port.sh)   /home/wz/esp32_event_clean_arch/scripts/flash-monitor.sh
 TARGET=esp32c6 CONSOLE=uart   ESPPORT=$(scripts/find-port.sh)   scripts/flash-monitor.sh
 RESET_SDKCONFIG=1 TARGET=esp32c6 CONSOLE=uart scripts/flash-monitor.sh

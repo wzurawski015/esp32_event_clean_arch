@@ -16,10 +16,6 @@
 #include <stdint.h>
 #include <stdbool.h>
 
-#if CONFIG_INFRA_LOG_CLI
-#include "logging_cli.h"
-#endif
-
 static const char* TAG = "APP_DEMO_LCD";
 
 // Lokalne zasoby tego aktora
@@ -134,12 +130,6 @@ bool app_demo_lcd_start(void)
         LOGE(TAG, "LCD init failed");
         return false;
     }
-
-    // REPL uruchamiamy tylko raz w systemie (robi to np. app__log_bus / main).
-    // Tutaj co najwyżej rejestrujemy komendy.
-#if CONFIG_INFRA_LOG_CLI
-    infra_log_cli_register();
-#endif
 
     // Zadanie-aktor z pętlą zdarzeń
     if (xTaskCreate(app_demo_lcd_task, "app_demo_lcd", 4096, NULL, tskIDLE_PRIORITY+2, &s_task) != pdPASS) {

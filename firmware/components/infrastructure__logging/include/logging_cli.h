@@ -1,6 +1,6 @@
 /**
  * @file logging_cli.h
- * @brief Rejestracja komend CLI i (opcjonalnie) start REPL.
+ * @brief Rejestracja komend CLI i (opcjonalnie) start REPL — wersja idempotentna.
  */
 #pragma once
 
@@ -8,11 +8,20 @@
 extern "C" {
 #endif
 
-/** Rejestruje komendy CLI (logrb / loglvl). */
-void infra_log_cli_register(void);
+#include "esp_err.h"
 
-/** Startuje REPL (USB-Serial-JTAG jeśli włączone w Kconfig; inaczej UART0). */
-void infra_log_cli_start_repl(void);
+/**
+ * Rejestruje komendy CLI („logrb”, „loglvl”) w sposób idempotentny.
+ * Powtórne wywołanie zwraca ESP_OK i nic nie robi.
+ */
+esp_err_t infra_log_cli_register(void);
+
+/**
+ * Startuje REPL (USB-Serial-JTAG jeśli włączone; inaczej UART) w sposób
+ * idempotentny i „miękki”. Jeżeli REPL już działa albo driver UART
+ * jest zajęty — zwraca ESP_OK bez abortu.
+ */
+esp_err_t infra_log_cli_start_repl(void);
 
 #ifdef __cplusplus
 }

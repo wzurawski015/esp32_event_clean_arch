@@ -3,9 +3,9 @@
  * @brief CLI: logrb (ring-buffer) + loglvl (poziomy logów) + opcjonalny REPL + evstat.
  *
  * Komendy:
- *  - logrb  : diagnostyka ring‑buffer logów (stat/clear/dump/tail)
- *  - loglvl : zmiana poziomu logowania w locie (per TAG lub globalnie '*')
- *  - evstat : szybkie statystyki event‑busa (suby, posts_ok/drop, enq_fail)
+ *  - logrb   : diagnostyka ring‑buffer logów (stat/clear/dump/tail)
+ *  - loglvl  : zmiana poziomu logowania w locie (per TAG lub globalnie '*')
+ *  - evstat  : statystyki event‑busa; teraz także: `evstat --reset`
  *
  * REPL uruchamiany jest „miękko” (idempotentnie), współdzieli UART jeśli zajęty.
  */
@@ -149,11 +149,15 @@ static int cmd_loglvl(int argc, char** argv)
 }
 
 /* ========================= evstat =========================
- * Podgląd statystyk event‑busa: evstat
+ * Podgląd statystyk event‑busa: evstat [--reset]
  */
 static int cmd_evstat(int argc, char **argv)
 {
-    (void)argc; (void)argv;
+    if (argc == 2 && strcmp(argv[1], "--reset") == 0) {
+        ev_reset_stats();
+        printf("ev: stats reset\n");
+        return 0;
+    }
     ev_stats_t s;
     ev_get_stats(&s);
     printf("ev: subs=%u q_depth_max=%u posts_ok=%u posts_drop=%u enq_fail=%u\n",
@@ -196,7 +200,7 @@ esp_err_t infra_log_cli_register(void)
 
     const esp_console_cmd_t cmd_evstat_desc = {
         .command = "evstat",
-        .help    = "Show event-bus stats (subs, posts_ok/drop, enq_fail)",
+        .help    = "Show event-bus stats (subs, posts_ok/drop, enq_fail). Usage: evstat [--reset]",
         .hint    = NULL,
         .func    = &cmd_evstat,
         .argtable= NULL

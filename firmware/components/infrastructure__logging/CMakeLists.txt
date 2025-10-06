@@ -18,4 +18,5 @@ idf_component_register(
         console         # esp_console.h
         vfs             # esp_vfs_dev.h (REPL przez UART0)
         driver          # driver/uart.h
+        core__ev        # core__ev/include i linkowanie
 )

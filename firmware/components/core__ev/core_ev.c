@@ -56,7 +56,9 @@ static uint16_t ev_broadcast(const ev_msg_t* m)
             delivered++;
         } else {
             /* kolejka subskrybenta pełna */
+            EV_CS_ENTER();
             s_enq_fail++;
+            EV_CS_EXIT();
         }
     }
     return delivered;
@@ -101,6 +103,26 @@ bool ev_subscribe(ev_queue_t* out_q, size_t depth)
     return true;
 }
 
+bool ev_unsubscribe(ev_queue_t q)
+{
+    if (!q) return false;
+
+    bool found = false;
+    EV_CS_ENTER();
+    for (uint16_t i = 0; i < s_subs_cnt; ++i) {
+        if (s_subs[i].q == q) {
+            s_subs[i].q = NULL;  // zostaw slot pusty (bez kompaktowania)
+            found = true;
+            break;
+        }
+    }
+    EV_CS_EXIT();
+
+    /* Nie wywołujemy tutaj vQueueDelete(q) – patrz komentarz w core_ev.h.
+     * Właściciel aktora powinien zniszczyć kolejkę dopiero po quiesce. */
+    return found;
+}
+
 bool ev_post(ev_src_t src, uint16_t code, uint32_t a0, uint32_t a1)
 {
     ev_msg_t m = {
@@ -111,13 +133,12 @@ bool ev_post(ev_src_t src, uint16_t code, uint32_t a0, uint32_t a1)
         .t_ms = now_ms(),
     };
     uint16_t n = ev_broadcast(&m);
-    if (n > 0) {
-        s_posts_ok++;
-        return true;
-    } else {
-        s_posts_drop++;
-        return false;
-    }
+
+    EV_CS_ENTER();
+    if (n > 0) s_posts_ok++; else s_posts_drop++;
+    EV_CS_EXIT();
+
+    return (n > 0);
 }
 
 bool ev_post_lease(ev_src_t src, uint16_t code, lp_handle_t h, uint16_t len)
@@ -133,30 +154,71 @@ bool ev_post_lease(ev_src_t src, uint16_t code, lp_handle_t h, uint16_t len)
 
     uint16_t delivered = ev_broadcast(&m);
 
-    /* Podbij refcount o realny fan-out... */
+    /* Podbij refcount o realny fan‑out... */
     if (delivered > 0) {
         lp_addref_n(h, delivered);
     }
     /* ...a następnie ZAWSZE zwolnij referencję producenta */
     lp_release(h);
 
-    if (delivered > 0) {
-        s_posts_ok++;
-        return true;
-    } else {
-        s_posts_drop++;
-        return false;
+    EV_CS_ENTER();
+    if (delivered > 0) s_posts_ok++; else s_posts_drop++;
+    EV_CS_EXIT();
+
+    return (delivered > 0);
+}
+
+bool ev_post_from_isr(ev_src_t src, uint16_t code, uint32_t a0, uint32_t a1)
+{
+    ev_msg_t m = {
+        .src  = src,
+        .code = code,
+        .a0   = a0,
+        .a1   = a1,
+        .t_ms = (uint32_t)(xTaskGetTickCountFromISR() * portTICK_PERIOD_MS),
+    };
+
+    /* Snapshot subskrybentów */
+    EV_CS_ENTER();
+    uint16_t n = s_subs_cnt;
+    ev_sub_t local[EV_MAX_SUBS];
+    if (n > EV_MAX_SUBS) n = EV_MAX_SUBS;
+    memcpy(local, s_subs, n * sizeof(ev_sub_t));
+    EV_CS_EXIT();
+
+    uint16_t delivered = 0;
+    BaseType_t hpw = pdFALSE;
+
+    for (uint16_t i = 0; i < n; ++i) {
+        if (local[i].q == NULL) continue;
+        if (xQueueSendFromISR(local[i].q, &m, &hpw) == pdTRUE) {
+            delivered++;
+        } else {
+            EV_CS_ENTER();
+            s_enq_fail++;
+            EV_CS_EXIT();
+        }
     }
+
+    EV_CS_ENTER();
+    if (delivered > 0) s_posts_ok++; else s_posts_drop++;
+    EV_CS_EXIT();
+
+    if (hpw == pdTRUE) {
+        portYIELD_FROM_ISR();
+    }
+    return (delivered > 0);
 }
 
 void ev_get_stats(ev_stats_t* out)
 {
     if (!out) return;
+
     EV_CS_ENTER();
     out->subs        = s_subs_cnt;
     out->q_depth_max = s_q_depth_max;
-    EV_CS_EXIT();
     out->posts_ok    = s_posts_ok;
     out->posts_drop  = s_posts_drop;
     out->enq_fail    = s_enq_fail;
+    EV_CS_EXIT();
 }

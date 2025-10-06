@@ -1,0 +1,18 @@
+PROJECT_NAME           = "core__ev (Event Bus)"
+OUTPUT_DIRECTORY       = @DOXYGEN_OUTPUT_DIR@
+INPUT                  = @DOXYGEN_INPUT_DIR@
+RECURSIVE              = YES
+GENERATE_LATEX         = NO
+GENERATE_HTML          = YES
+EXTRACT_ALL            = YES
+EXTRACT_STATIC         = YES
+QUIET                  = YES
+
+# Graphviz
+HAVE_DOT               = YES
+DOT_IMAGE_FORMAT       = svg
+CALL_GRAPH             = YES
+CALLER_GRAPH           = YES
+DOT_MULTI_TARGETS      = YES
+DOT_TRANSPARENT        = YES
+DOT_GRAPH_MAX_NODES    = 80

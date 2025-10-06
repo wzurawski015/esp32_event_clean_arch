@@ -1,6 +1,13 @@
 /**
  * @file logging_cli.c
- * @brief CLI: logrb (ring-buffer) + loglvl (poziomy logów) + opcjonalny REPL.
+ * @brief CLI: logrb (ring-buffer) + loglvl (poziomy logów) + opcjonalny REPL + evstat.
+ *
+ * Komendy:
+ *  - logrb   : diagnostyka ring‑buffer logów (stat/clear/dump/tail)
+ *  - loglvl  : zmiana poziomu logowania w locie (per TAG lub globalnie '*')
+ *  - evstat  : statystyki event‑busa; teraz także: `evstat --reset`
+ *
+ * REPL uruchamiany jest „miękko” (idempotentnie), współdzieli UART jeśli zajęty.
  */
 
 #include "sdkconfig.h"
@@ -26,6 +33,9 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <stdbool.h>
+
+/* nowa komenda: evstat */
+#include "core_ev.h"
 
 #define TAG "LOGCLI"
 
@@ -138,6 +148,24 @@ static int cmd_loglvl(int argc, char** argv)
     return 0;
 }
 
+/* ========================= evstat =========================
+ * Podgląd statystyk event‑busa: evstat [--reset]
+ */
+static int cmd_evstat(int argc, char **argv)
+{
+    if (argc == 2 && strcmp(argv[1], "--reset") == 0) {
+        ev_reset_stats();
+        printf("ev: stats reset\n");
+        return 0;
+    }
+    ev_stats_t s;
+    ev_get_stats(&s);
+    printf("ev: subs=%u q_depth_max=%u posts_ok=%u posts_drop=%u enq_fail=%u\n",
+           (unsigned)s.subs, (unsigned)s.q_depth_max,
+           (unsigned)s.posts_ok, (unsigned)s.posts_drop, (unsigned)s.enq_fail);
+    return 0;
+}
+
 /* ==================== rejestracja CLI (idempotentna) ==================== */
 
 static bool s_cmds_registered = false;
@@ -170,8 +198,17 @@ esp_err_t infra_log_cli_register(void)
     };
     ESP_ERROR_CHECK_WITHOUT_ABORT(esp_console_cmd_register(&cmd_loglvl_desc));
 
+    const esp_console_cmd_t cmd_evstat_desc = {
+        .command = "evstat",
+        .help    = "Show event-bus stats (subs, posts_ok/drop, enq_fail). Usage: evstat [--reset]",
+        .hint    = NULL,
+        .func    = &cmd_evstat,
+        .argtable= NULL
+    };
+    ESP_ERROR_CHECK_WITHOUT_ABORT(esp_console_cmd_register(&cmd_evstat_desc));
+
     s_cmds_registered = true;
-    ESP_LOGI(TAG, "registered 'logrb' and 'loglvl' commands");
+    ESP_LOGI(TAG, "registered 'logrb', 'loglvl' and 'evstat' commands");
     return ESP_OK;
 }
 
@@ -196,7 +233,10 @@ esp_err_t infra_log_cli_start_repl(void)
     ensure_mux_();
     if (!s_cli_mux) return ESP_ERR_NO_MEM;
 
-    xSemaphoreTake(s_cli_mux, portMAX_DELAY);
+    if (xSemaphoreTake(s_cli_mux, pdMS_TO_TICKS(250)) != pdTRUE) {
+        ESP_LOGW(TAG, "REPL mutex timeout");
+        return ESP_ERR_TIMEOUT;
+    }
 
     if (s_repl) {  // już działa
         xSemaphoreGive(s_cli_mux);
@@ -219,7 +259,7 @@ esp_err_t infra_log_cli_start_repl(void)
         xSemaphoreGive(s_cli_mux);
         return err;
     }
-    // Zarejestruj komendy (idempotentnie)
+    // Komendy (idempotentnie)
     infra_log_cli_register();
 
     err = esp_console_start_repl(repl);
@@ -236,7 +276,6 @@ esp_err_t infra_log_cli_start_repl(void)
 #else
     // UART REPL — „miękko” współdzieli się z innymi
     esp_console_dev_uart_config_t uart_cfg = ESP_CONSOLE_DEV_UART_CONFIG_DEFAULT();
-    // Domyślny kanał, jeśli Kconfig nie podał innego
     #if defined(CONFIG_ESP_CONSOLE_UART_NUM)
         const uart_port_t cli_uart = (uart_port_t)CONFIG_ESP_CONSOLE_UART_NUM;
         uart_cfg.channel = cli_uart;
@@ -244,13 +283,9 @@ esp_err_t infra_log_cli_start_repl(void)
         const uart_port_t cli_uart = UART_NUM_0;
         uart_cfg.channel = UART_NUM_0;
     #endif
-    // Pozostaw -1,-1 aby użyć domyślnych pinów konsoli
-    // uart_cfg.tx_gpio_num / rx_gpio_num pozostają z DEFAULT
 
-    // Jeśli ktoś wcześniej zainstalował driver na tym porcie — nie startujemy drugiego REPL
     if (uart_is_driver_installed(cli_uart)) {
         ESP_LOGW(TAG, "UART driver already installed — skip starting second REPL");
-        // Komendy i tak są (lub zaraz będą) zarejestrowane:
         infra_log_cli_register();
         xSemaphoreGive(s_cli_mux);
         return ESP_OK;
@@ -264,7 +299,6 @@ esp_err_t infra_log_cli_start_repl(void)
         return err;
     }
 
-    // Zarejestruj komendy (idempotentnie)
     infra_log_cli_register();
 
     err = esp_console_start_repl(repl);

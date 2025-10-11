@@ -69,8 +69,8 @@ exec docker run --entrypoint "" "${docker_args[@]}" "${IDF_IMAGE}" bash -lc '
   mkdir -p "$HOME/.ccache" "$HOME/.cache/ccache" "$HOME/.espressif"
   [[ -w "$HOME/.ccache" ]] || { echo "ERR: $HOME/.ccache nie jest zapisywalny"; exit 93; }
 
-  # Ciche załadowanie środowiska IDF (eliminuje „Activating ESP‑IDF …” w logach)
-  . "${IDF_PATH}/export.sh" >/dev/null
+  # Ciche załadowanie środowiska IDF — całkowicie (stdout+stderr)
+  . "${IDF_PATH}/export.sh" >/dev/null 2>&1
 
   # Bezpieczniki dla zmontowanych repozytoriów (na wszelki wypadek)
   git config --global --add safe.directory /opt/esp/idf >/dev/null 2>&1 || true

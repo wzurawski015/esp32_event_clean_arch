@@ -3,6 +3,7 @@ set -Eeuo pipefail
 # shellcheck disable=SC1091
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/common.env.sh"
 
+# --------- Platforma do wyboru manifestu ----------
 case "$(uname -m)" in
   x86_64|amd64) WANT_ARCH="amd64" ;;
   aarch64|arm64) WANT_ARCH="arm64" ;;
@@ -13,12 +14,16 @@ WANT_OS="linux"
 need_persist=0
 if [[ "${IDF_DIGEST}" == "sha256:REPLACE_ME" || -z "${IDF_DIGEST}" ]]; then
   echo "INFO: autowykrywam digest dla ${WANT_OS}/${WANT_ARCH} (espressif/idf:v${IDF_TAG})…"
+
+  # 1) Prefer jq + docker manifest (szybkie i precyzyjne)
   if command -v jq >/dev/null 2>&1; then
     IDF_DIGEST="$(docker manifest inspect "espressif/idf:v${IDF_TAG}" \
         | jq -r --arg os "${WANT_OS}" --arg arch "${WANT_ARCH}" \
         '.manifests[] | select(.platform.os==$os and .platform.architecture==$arch) | .digest' \
         | head -n1 || true)"
   fi
+
+  # 2) Fallback: buildx imagetools (gdy brak jq)
   if [[ -z "${IDF_DIGEST}" ]]; then
     IDF_DIGEST="$(docker buildx imagetools inspect "espressif/idf:v${IDF_TAG}" 2>/dev/null \
       | awk -v want="${WANT_OS}/${WANT_ARCH}" '
@@ -26,22 +31,36 @@ if [[ "${IDF_DIGEST}" == "sha256:REPLACE_ME" || -z "${IDF_DIGEST}" ]]; then
           /^Digest:/ && plat==want {print $2; exit}
       ' || true)"
   fi
-  if [[ -z "${IDF_DIGEST}" && command -v jq >/dev/null 2>&1 ]]; then
-    IDF_DIGEST="$(docker manifest inspect "espressif/idf:v${IDF_TAG}" | jq -r '.manifests[0].digest' || true)"
+
+  # 3) Ostateczny fallback: pierwszy manifest (wymaga jq)
+  if [[ -z "${IDF_DIGEST}" ]] && command -v jq >/dev/null 2>&1; then
+    IDF_DIGEST="$(docker manifest inspect "espressif/idf:v${IDF_TAG}" \
+                  | jq -r '.manifests[0].digest' || true)"
   fi
+
   [[ "${IDF_DIGEST}" =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "ERR: nie wykryłem sha256 dla v${IDF_TAG}"; exit 3; }
   echo "INFO: wykryty digest: ${IDF_DIGEST}"
   need_persist=1
 fi
 
 echo "Building ${IDF_IMAGE} (IDF ${IDF_TAG} @ ${IDF_DIGEST})"
-docker buildx build --load \
-  --build-arg IDF_TAG="${IDF_TAG}" \
-  --build-arg IDF_DIGEST="${IDF_DIGEST}" \
-  --label org.opencontainers.image.source="$(git -C "${ROOT}" config --get remote.origin.url || echo unknown)" \
-  --label org.opencontainers.image.revision="$(git -C "${ROOT}" rev-parse --short=12 HEAD || echo unknown)" \
-  -f "${ROOT}/Docker/Dockerfile.idf-5.5.1" \
-  -t "${IDF_IMAGE}" "${ROOT}"
+
+if docker buildx version >/dev/null 2>&1; then
+  docker buildx build --load \
+    --build-arg IDF_TAG="${IDF_TAG}" \
+    --build-arg IDF_DIGEST="${IDF_DIGEST}" \
+    --label org.opencontainers.image.source="$(git -C "${ROOT}" config --get remote.origin.url || echo unknown)" \
+    --label org.opencontainers.image.revision="$(git -C "${ROOT}" rev-parse --short=12 HEAD || echo unknown)" \
+    -f "${ROOT}/Docker/Dockerfile.idf-5.5.1" \
+    -t "${IDF_IMAGE}" "${ROOT}"
+else
+  # awaryjnie, bez buildx
+  docker build \
+    --build-arg IDF_TAG="${IDF_TAG}" \
+    --build-arg IDF_DIGEST="${IDF_DIGEST}" \
+    -f "${ROOT}/Docker/Dockerfile.idf-5.5.1" \
+    -t "${IDF_IMAGE}" "${ROOT}"
+fi
 
 if (( need_persist )); then
   tmp="${ROOT}/.env.tmp.$$"

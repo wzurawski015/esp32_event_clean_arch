@@ -1,94 +1,53 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
+# shellcheck disable=SC1091
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/common.env.sh"
 
-# ===== Repo root ==============================================================
-if ROOT_GIT="$(git -C "$(dirname "${BASH_SOURCE[0]}")" rev-parse --show-toplevel 2>/dev/null)"; then
-  ROOT="${ROOT_GIT}"
-else
-  ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-fi
+# Katalog projektu wewnątrz repo
+proj_dir="${ROOT}/firmware/projects/${PROJ}"
+[[ -d "${proj_dir}" ]] || { echo "ERR: brak katalogu projektu: ${proj_dir}" >&2; exit 3; }
 
-PROJ="${PROJ:-demo_lcd_rgb}"
-TARGET="${TARGET:-esp32c6}"
+# Przygotowanie argumentów Dockera
+tty_args=()
+[[ -t 0 ]] && tty_args+=(-t)   # TTY tylko gdy interaktywnie; -i dajemy zawsze (monitor potrzebuje STDIN)
 
-PROJ_DIR="${ROOT}/firmware/projects/${PROJ}"
-[[ -d "${PROJ_DIR}" ]] || { echo "ERR: brak projektu '${PROJ}' w firmware/projects" >&2; exit 2; }
+docker_args=(
+  --rm -i "${tty_args[@]}"
+  --user "$(id -u)":"$(id -g)"
+  -e HOME="${DOCKER_HOME}"
+  -e IDF_CCACHE_ENABLE=1
+  -e IDF_TARGET="${TARGET}"
+  -v "${ROOT}:/work"
+  -v "${DOCKER_HOME_MOUNT}:${DOCKER_HOME}:rw"
+  -w "/work/firmware/projects/${PROJ}"
+)
 
-# ===== Docker image & HOME ====================================================
-# Użyj swojego obrazu (albo oficjalnego espressif/idf:v5.5.1 przez ENV).
-IMAGE="${IDF_IMAGE:-esp32-idf:5.5.1-docs}"
-# Walidacja nazwy obrazu (eliminuje 'invalid reference format')
-if [[ -z "${IMAGE}" ]] || printf '%s' "${IMAGE}" | grep -q '[[:space:][:cntrl:]]'; then
-  echo "ERR: IDF_IMAGE='${IMAGE}' jest puste/ma białe/sterujące znaki" >&2
-  printf 'Hex: '; printf '%s' "${IMAGE}" | od -An -t x1; echo
-  exit 91
-fi
-if ! docker image inspect "${IMAGE}" >/dev/null 2>&1; then
-  echo "WARN: obraz '${IMAGE}' nie istnieje lokalnie – Docker spróbuje pobrać." >&2
-fi
+# Przekaż podstawowe ENV do środka (u Ciebie CMake/CMakeLists używa m.in. CONSOLE)
+for v in PROJ TARGET CONSOLE ESPBAUD MONBAUD; do
+  [[ -n "${!v:-}" ]] && docker_args+=(-e "${v}=${!v}")
+done
 
-# Repo-lokalny HOME (żeby artefakty nie były root-owe)
-HOST_HOME="${ROOT}/.idf-docker-home"
-mkdir -p "${HOST_HOME}/.espressif" "${HOST_HOME}/.cache/ccache" "${HOST_HOME}/.ccache"
-
-# ===== Port szeregowy & grupy =================================================
-PORT_DEV=()
-GROUP_ADD=()
+# UART: device + GID grupy urządzenia (aby mieć RW bez privileged)
 if [[ -n "${ESPPORT:-}" && -e "${ESPPORT}" ]]; then
-  PORT_DEV=(--device="${ESPPORT}:${ESPPORT}")
-  if DEV_GID="$(stat -c '%g' "${ESPPORT}" 2>/dev/null)"; then
-    GROUP_ADD=(--group-add "${DEV_GID}")
+  docker_args+=(--device="${ESPPORT}:${ESPPORT}")
+  if gid="$(stat -c '%g' "${ESPPORT}" 2>/dev/null)"; then
+    docker_args+=(--group-add "${gid}")
+  elif gid="$(stat -f '%g' "${ESPPORT}" 2>/dev/null)"; then # macOS/BSD fallback
+    docker_args+=(--group-add "${gid}")
   fi
-elif [[ -n "${ESPPORT:-}" ]]; then
-  echo "WARN: ESPPORT='${ESPPORT}' nie istnieje – pomijam mapowanie." >&2
+  docker_args+=(-e "ESPPORT=${ESPPORT}")
 fi
 
-# ===== TTY & user =============================================================
-TTY=(); [[ -t 1 ]] && TTY=(-it)
-DOCKER_USER=(-u "$(id -u)":"$(id -g)")
+# Przydatne zmienne terminala (ładniejsze REPL/monitor)
+[[ -n "${TERM:-}"    ]] && docker_args+=(-e "TERM=${TERM}")
+[[ -n "${COLUMNS:-}" ]] && docker_args+=(-e "COLUMNS=${COLUMNS}")
+[[ -n "${LINES:-}"   ]] && docker_args+=(-e "LINES=${LINES}")
 
-# ===== uruchomienie ===========================================================
-docker run --rm "${TTY[@]}" \
-  "${DOCKER_USER[@]}" \
-  "${GROUP_ADD[@]}" \
-  -e HOME="/home/builder" \
-  -e LANG="C.UTF-8" -e LC_ALL="C.UTF-8" \
-  -e TERM="${TERM:-xterm-256color}" -e COLUMNS="${COLUMNS:-120}" -e LINES="${LINES:-40}" \
-  -e IDF_CCACHE_ENABLE=1 \
-  -e CCACHE_DIR="/home/builder/.ccache" \
-  -e IDF_TARGET="${TARGET}" -e PROJ="${PROJ}" -e TARGET="${TARGET}" \
-  -v "${ROOT}:${ROOT}" \
-  -v "${HOST_HOME}:/home/builder" \
-  "${PORT_DEV[@]}" \
-  ${IDF_EXTRA_DOCKER_ARGS:-} \
-  "${IMAGE}" \
-  bash -lc '
-    set -Eeuo pipefail
+# Opcjonalny dopalacz: dodatkowe argumenty do docker run (np. --network host)
+if [[ -n "${IDF_EXTRA_DOCKER_ARGS:-}" ]]; then
+  # shellcheck disable=SC2206
+  docker_args+=(${IDF_EXTRA_DOCKER_ARGS})
+fi
 
-    # HOME i cache (musi być zapisywalny)
-    mkdir -p "$HOME/.espressif" "$HOME/.cache/ccache" "$HOME/.ccache"
-    if [[ ! -w "$HOME/.ccache" ]]; then
-      echo "ERR: $HOME/.ccache nie jest zapisywalny (ccache)"; ls -ld "$HOME" "$HOME/.ccache"; exit 93
-    fi
-
-    # IDF środowisko
-    if [[ -z "${IDF_PATH:-}" || ! -d "${IDF_PATH:-}" ]]; then
-      echo "ERR: brak IDF_PATH w obrazie; sprawdź obraz Docker." >&2; exit 90
-    fi
-    . "${IDF_PATH}/export.sh" >/dev/null
-
-    # (workaround) git safe.directory dla repo w obrazie
-    git config --global --add safe.directory /opt/esp/idf            >/dev/null 2>&1 || true
-    git config --global --add safe.directory /opt/esp/idf/components/openthread/openthread >/dev/null 2>&1 || true
-
-    cd "'"${PROJ_DIR//\'/\'\\\'\'}"'"
-
-    # ensure_target tylko gdy potrzeba
-    CUR=$(grep -E "^CONFIG_IDF_TARGET=\"" sdkconfig 2>/dev/null | sed -E "s/.*\"(.+)\".*/\1/" || true)
-    if [[ "${CUR:-}" != "'"${TARGET}"'" ]]; then
-      idf.py set-target "'"${TARGET}"'"
-    fi
-
-    # wykonaj dokładnie to, co przyszło
-    idf.py "$@"
-  ' -- "$@"
+# Uruchom dokładnie to, co podano w linii poleceń
+exec docker run "${docker_args[@]}" "${IDF_IMAGE}" idf.py "$@"

@@ -1,15 +1,28 @@
-# --- VCS ------------------------------------------------------
+# --- VCS / metadane --------------------------------------------------
 .git
 .git/**
-.github
+.github/
 .gitmodules
 
-# --- Sekrety / lokalne pliki środowiskowe (niepotrzebne do obrazu) ---
+# --- Pliki środowiskowe (sekrety) -----------------------------------
 .env
+.env.*
 
-# --- Build artefakty ESP-IDF / C/C++ --------------------------
-firmware/**/build/
+# --- Build artefakty (CMake / ESP-IDF) -------------------------------
+**/build/
 **/managed_components/
+**/CMakeFiles/
+**/CMakeCache.txt
+**/cmake_install.cmake
+**/Makefile
+**/rules.ninja
+**/.ninja_deps
+**/.ninja_log
+compile_commands.json
+CMakeUserPresets.json
+CMakePresets.json
+
+# --- Binarne/pośrednie ----------------------------------------------
 **/*.o
 **/*.obj
 **/*.a
@@ -23,6 +36,8 @@ firmware/**/build/
 **/*.map
 **/*.hex
 **/*.srec
+
+# --- Pliki generowane przez IDF/esptool ------------------------------
 **/flasher_args.json
 **/flash_project_args
 **/flash_args
@@ -37,16 +52,15 @@ firmware/**/build/
 **/ldgen_libraries
 **/ldgen_libraries.in
 **/x509_crt_bundle.S
-**/compile_commands.json
 
-# Skonfigurowane SDK (trzymamy tylko defaults)
+# --- SDKCONFIG (zostaw wyłącznie defaults) --------------------------
 firmware/projects/**/sdkconfig
 firmware/projects/**/sdkconfig.old
 firmware/projects/**/sdkconfig.*.bak
 !firmware/projects/**/sdkconfig.defaults
 !firmware/projects/**/sdkconfig.*.defaults
 
-# --- Cache / HOME kontenera / narzędzia -----------------------
+# --- Cache / HOME kontenera (i tak montowane) -----------------------
 .idf-docker-home/
 .espressif/
 **/.ccache/
@@ -54,7 +68,7 @@ firmware/projects/**/sdkconfig.*.bak
 **/__pycache__/
 **/*.pyc
 
-# --- Edytory / IDE / systemowe śmieci -------------------------
+# --- Edytory / IDE / systemowe --------------------------------------
 **/.vscode/
 **/.idea/
 **/*.iml
@@ -64,14 +78,15 @@ Thumbs.db
 *~
 *.swp
 *.swo
+tags
 
-# --- Doxygen / Sphinx / docs (generowane) ---------------------
+# --- Dokumentacja (generowane) --------------------------------------
 docs/html/
 docs/latex/
 docs/xml/
 docs/_build/
 
-# --- Logi / archiwa -------------------------------------------
+# --- Logi / archiwa --------------------------------------------------
 **/log/
 **/*.log
 **/log/idf_py_stdout_output_*

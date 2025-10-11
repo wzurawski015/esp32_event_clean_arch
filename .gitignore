@@ -1,12 +1,13 @@
-# --- Ogólne śmieci systemowe/edytory --------------------------
+# --- Ogólne / systemowe ---------------------------------------------
 .DS_Store
 Thumbs.db
 *~
 *.swp
 *.swo
+tags
 
-# --- Workspace / IDE ------------------------------------------
-/.vscode/
+# --- IDE / workspace -------------------------------------------------
+.vscode/
 .idea/
 *.iml
 *.code-workspace
@@ -14,9 +15,8 @@ Thumbs.db
 .clangd/
 cmake-build-*/
 .vs/
-tags
 
-# --- Python (skrypty pomocnicze) ------------------------------
+# --- Python (skrypty pomocnicze) ------------------------------------
 __pycache__/
 *.pyc
 .venv/
@@ -25,7 +25,7 @@ env/
 .mypy_cache/
 .pytest_cache/
 
-# --- ESP-IDF / CMake: artefakty (gdziekolwiek) ----------------
+# --- CMake / ESP-IDF: artefakty -------------------------------------
 **/build/
 **/managed_components/
 **/CMakeFiles/
@@ -35,10 +35,11 @@ env/
 **/rules.ninja
 **/.ninja_deps
 **/.ninja_log
-**/compile_commands.json
+compile_commands.json
 CMakeUserPresets.json
+CMakePresets.json
 
-# Obiekty/archiwa/biblioteki
+# --- Obiekty / archiwa / biblioteki ---------------------------------
 **/*.o
 **/*.obj
 **/*.a
@@ -48,14 +49,14 @@ CMakeUserPresets.json
 **/*.d
 **/*.dwo
 
-# Obrazy i mapy aplikacji
+# --- Obrazy i mapy aplikacji ----------------------------------------
 **/*.bin
 **/*.elf
 **/*.map
 **/*.hex
 **/*.srec
 
-# Pliki generowane przez esptool/IDF
+# --- Pliki generowane przez esptool/IDF ------------------------------
 **/flasher_args.json
 **/flash_project_args
 **/flash_args
@@ -70,39 +71,41 @@ CMakeUserPresets.json
 **/ldgen_libraries
 **/ldgen_libraries.in
 
-# Skonfigurowane SDK (utrzymuj tylko defaults w repo)
+# --- Skonfigurowane SDK (utrzymuj tylko defaults) -------------------
 firmware/projects/**/sdkconfig
 firmware/projects/**/sdkconfig.old
 firmware/projects/**/sdkconfig.*.bak
 !firmware/projects/**/sdkconfig.defaults
 !firmware/projects/**/sdkconfig.*.defaults
 
-# Bundlowanie certów (czasem ląduje poza build/)
+# --- Bundlowanie certów (generowane) --------------------------------
 **/x509_crt_bundle.S
 
-# Doxygen / Sphinx (generowane)
+# --- Dokumentacja (generowane) --------------------------------------
 docs/html/
 docs/latex/
 docs/xml/
 docs/_build/
 
-# Inne tymczasowe / narzędzia / logi
+# --- Pokrycie / profilery / core dumps -------------------------------
 *.gcno
 *.gcda
 *.gcov
 gmon.out
 core
 vgcore.*
-*.zip
-*.7z
-*.tar
-*.tar.gz
+
+# --- Logi / archiwa --------------------------------------------------
 **/log/
 **/*.log
 **/log/idf_py_stdout_output_*
 **/log/idf_py_stderr_output_*
+*.zip
+*.7z
+*.tar
+*.tar.gz
 
-# ESP-IDF Docker home / ccache (nie wrzucamy do repo)
+# --- ESP-IDF Docker home / ccache (nie wrzucamy do repo) ------------
 .idf-docker-home/
 **/.ccache/
 .espressif/

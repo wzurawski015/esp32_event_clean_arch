@@ -3,11 +3,10 @@ set -Eeuo pipefail
 # shellcheck disable=SC1091
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/common.env.sh"
 
-# --------- Platforma do wyboru manifestu ----------
 case "$(uname -m)" in
   x86_64|amd64) WANT_ARCH="amd64" ;;
   aarch64|arm64) WANT_ARCH="arm64" ;;
-  *) WANT_ARCH="$(uname -m)" ;;
+  *)             WANT_ARCH="$(uname -m)" ;;
 esac
 WANT_OS="linux"
 
@@ -15,11 +14,11 @@ need_persist=0
 if [[ "${IDF_DIGEST}" == "sha256:REPLACE_ME" || -z "${IDF_DIGEST}" ]]; then
   echo "INFO: autowykrywam digest dla ${WANT_OS}/${WANT_ARCH} (espressif/idf:v${IDF_TAG})…"
 
-  # 1) Prefer jq + docker manifest (szybkie i precyzyjne)
+  # 1) Prefer: docker manifest + jq
   if command -v jq >/dev/null 2>&1; then
     IDF_DIGEST="$(docker manifest inspect "espressif/idf:v${IDF_TAG}" \
         | jq -r --arg os "${WANT_OS}" --arg arch "${WANT_ARCH}" \
-        '.manifests[] | select(.platform.os==$os and .platform.architecture==$arch) | .digest' \
+          '.manifests[] | select(.platform.os==$os and .platform.architecture==$arch) | .digest' \
         | head -n1 || true)"
   fi
 
@@ -45,6 +44,7 @@ fi
 
 echo "Building ${IDF_IMAGE} (IDF ${IDF_TAG} @ ${IDF_DIGEST})"
 
+# buildx (preferowane), lub klasyczny build jako fallback
 if docker buildx version >/dev/null 2>&1; then
   docker buildx build --load \
     --build-arg IDF_TAG="${IDF_TAG}" \
@@ -54,7 +54,7 @@ if docker buildx version >/dev/null 2>&1; then
     -f "${ROOT}/Docker/Dockerfile.idf-5.5.1" \
     -t "${IDF_IMAGE}" "${ROOT}"
 else
-  # awaryjnie, bez buildx
+  echo "WARN: docker buildx nie znaleziony — używam klasycznego 'docker build'."
   docker build \
     --build-arg IDF_TAG="${IDF_TAG}" \
     --build-arg IDF_DIGEST="${IDF_DIGEST}" \

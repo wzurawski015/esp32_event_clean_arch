@@ -1,41 +1,58 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-# --------- Ustal ROOT repo (nawet uruchamiane z dowolnego katalogu) ---------
+# --------- Wyznacz ROOT repo, eksportuj PRZED czytaniem .env ---------
 if ROOT_GIT="$(git -C "$(dirname "${BASH_SOURCE[0]}")" rev-parse --show-toplevel 2>/dev/null)"; then
   ROOT="${ROOT_GIT}"
 else
   ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 fi
-# EKSPORTUJ ROOT PRZED WCZYTANIEM .env -> aby ${ROOT} w .env działało
 export ROOT
 
-# --------- Prosty loader .env (ENV ma pierwszeństwo nad .env) ---------
+# --------- Loader .env: ENV ma pierwszeństwo, ekspansja z ochroną przed -u ---------
 dotenv() {
   local file="${1:-}"
   [[ -f "${file}" ]] || return 0
-  # Czytaj linia po linii
+
+  # Zapamiętaj, czy -u było włączone, i tymczasowo je wyłącz
+  local had_u=0
+  case "$-" in *u*) had_u=1; set +u;; esac
+
   while IFS= read -r line || [[ -n "${line}" ]]; do
-    # Usuń CR z końca (gdy plik powstał na Windows)
-    line="${line%$'\r'}"
-    # Puste linie i komentarze
+    line="${line%$'\r'}"                           # zdejmij CR (Windows)
     [[ -z "${line}" || "${line}" =~ ^[[:space:]]*# ]] && continue
-    # Klucz=wartość
+
     if [[ "${line}" =~ ^[A-Za-z_][A-Za-z0-9_]*= ]]; then
-      local key="${line%%=*}" val="${line#*=}"
-      # Rozwiń referencje typu ${FOO} w KONTEKŚCIE TEJ POWŁOKI
-      # (widzimy już tutaj ${ROOT}, ${IDF_TAG} itd.)
-      # shellcheck disable=SC2034
+      local key="${line%%=*}"
+      local val="${line#*=}"
+
+      # utnij komentarz inline ' #...' (prosto i skutecznie dla naszych wartości)
+      # UWAGA: jeśli kiedyś będziesz potrzebował znaku '# ' w wartości, użyj cudzysłowów w .env
+      case "${val}" in
+        *" #"*) val="${val%% \#*}";;
+        *$'\t#'*) val="${val%%$'\t'#*}";;
+      esac
+      # usuń końcowe spacje
+      val="${val%"${val##*[![:space:]]}"}"
+
+      # Rozwiń referencje (ROOT jest już ustawiony, wcześniejsze klucze też)
+      local val_expanded
       eval "val_expanded=\"${val}\""
-      # Nie nadpisuj, jeśli już ustawione w środowisku
-      [[ -z "${!key+x}" ]] && eval "export ${key}=\"\${val_expanded}\""
+
+      # Nie nadpisuj jeśli zmienna jest już w środowisku
+      if [[ -z "${!key+x}" ]]; then
+        printf -v "${key}" '%s' "${val_expanded}"
+        export "${key}"
+      fi
     fi
   done < "${file}"
+
+  ((had_u)) && set -u  # przywróć -u, jeśli było
 }
 
 dotenv "${ROOT}/.env"
 
-# --------- Domyślne wartości (jeśli brak w ENV/.env) ---------
+# --------- Domyślne wartości, gdy czegoś nie było w ENV/.env ---------
 : "${IDF_TAG:=5.5.1}"
 : "${IDF_DIGEST:=sha256:REPLACE_ME}"
 : "${IDF_IMAGE:=esp32-idf:${IDF_TAG}-docs}"
@@ -48,5 +65,4 @@ dotenv "${ROOT}/.env"
 : "${DOCKER_HOME:=/home/esp}"
 : "${DOCKER_HOME_MOUNT:=${ROOT}/.idf-docker-home}"
 
-# Eksport na koniec (gdyby ktoś sourował ten plik „na zimno”)
 export ROOT IDF_TAG IDF_DIGEST IDF_IMAGE PROJ TARGET ESPBAUD MONBAUD DOCKER_HOME DOCKER_HOME_MOUNT

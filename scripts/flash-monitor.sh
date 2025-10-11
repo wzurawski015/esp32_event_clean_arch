@@ -44,6 +44,8 @@ ESPPORT="${ESPPORT}" "${ROOT}/scripts/idf.sh" build
 if [[ -f "${proj_dir}/sdkconfig.${TARGET}.defaults" && -f "${build_dir}/flash_args" ]]; then
   want="$(grep -E '^CONFIG_ESPTOOLPY_FLASHSIZE="' "${proj_dir}/sdkconfig.${TARGET}.defaults" | cut -d'"' -f2 || true)"
   got="$(grep -oE -- '--flash_size[[:space:]]+[^[:space:]]+' "${build_dir}/flash_args" | awk '{print $2}' | head -n1 || true)"
+  # sanitizacja ewentualnych artefaktów typu 'detect>'
+  got="${got//\\>/}"; got="${got%>}"
   echo "Pre-check flash_size: want='${want:-<none>}' got='${got:-<none>}'"
   if [[ -n "${want}" && "${want}" != "detect" && -n "${got}" && "${got}" != "detect" && "${got}" != "${want}" ]]; then
     echo "WARN: flash_size różne: build='${got}', defaults='${want}'. Jeśli zmieniałeś target/partycje – uruchom z RESET_SDKCONFIG=1." >&2

@@ -14,6 +14,7 @@ tty_args=()
 docker_args=(
   --rm -i "${tty_args[@]}"
   --user "$(id -u)":"$(id -g)"
+  --entrypoint bash
   -e HOME="${DOCKER_HOME}"
   -e LANG="C.UTF-8" -e LC_ALL="C.UTF-8" -e TERM="${TERM:-xterm-256color}"
   -e IDF_CCACHE_ENABLE=1
@@ -52,7 +53,7 @@ if [[ -n "${IDF_EXTRA_DOCKER_ARGS:-}" ]]; then
 fi
 
 # --- Uruchomienie wewnątrz kontenera (ciche export.sh + sanity) ---------------------
-exec docker run "${docker_args[@]}" "${IDF_IMAGE}" bash -lc '
+exec docker run "${docker_args[@]}" "${IDF_IMAGE}" -lc '
   set -Eeuo pipefail
 
   : "${IDF_PATH:?ERR: brak IDF_PATH w obrazie}"

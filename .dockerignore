@@ -1,0 +1,14 @@
+# VCS
+.git
+.git/*
+
+# Build artefakty
+firmware/**/build
+
+# Lokalne HOME kontenera (i tak jest montowane, w obrazie niepotrzebne)
+.idf-docker-home
+
+# Systemowe śmieci
+**/.DS_Store
+**/.idea
+**/.vscode

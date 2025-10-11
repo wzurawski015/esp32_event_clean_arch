@@ -7,6 +7,11 @@ source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/common.env.sh"
 proj_dir="${ROOT}/firmware/projects/${PROJ}"
 [[ -d "${proj_dir}" ]] || { echo "ERR: brak katalogu projektu: ${proj_dir}" >&2; exit 3; }
 
+# --- Przygotuj hostowy HOME kontenera (żeby nic nie było root:root) ----------------
+mkdir -p "${DOCKER_HOME_MOUNT}/.espressif" \
+         "${DOCKER_HOME_MOUNT}/.cache/ccache" \
+         "${DOCKER_HOME_MOUNT}/.ccache"
+
 # --- Argumenty docker run -----------------------------------------------------------
 tty_args=()
 [[ -t 0 ]] && tty_args+=(-t)   # -t tylko jeśli mamy TTY; -i zawsze (monitor potrzebuje STDIN)
@@ -14,11 +19,12 @@ tty_args=()
 docker_args=(
   --rm -i "${tty_args[@]}"
   --user "$(id -u)":"$(id -g)"
-  --entrypoint bash
   -e HOME="${DOCKER_HOME}"
   -e LANG="C.UTF-8" -e LC_ALL="C.UTF-8" -e TERM="${TERM:-xterm-256color}"
   -e IDF_CCACHE_ENABLE=1
   -e CCACHE_DIR="${DOCKER_HOME}/.ccache"
+  -e CCACHE_COMPRESS=1
+  -e CCACHE_MAXSIZE=5G
   -e IDF_TARGET="${TARGET}"
   -v "${ROOT}:/work"
   -v "${DOCKER_HOME_MOUNT}:${DOCKER_HOME}:rw"
@@ -53,7 +59,8 @@ if [[ -n "${IDF_EXTRA_DOCKER_ARGS:-}" ]]; then
 fi
 
 # --- Uruchomienie wewnątrz kontenera (ciche export.sh + sanity) ---------------------
-exec docker run "${docker_args[@]}" "${IDF_IMAGE}" -lc '
+# Uwaga: --entrypoint "" wycisza domyślny entrypoint obrazu (czyli blok „Activating ESP‑IDF…”).
+exec docker run --entrypoint "" "${docker_args[@]}" "${IDF_IMAGE}" bash -lc '
   set -Eeuo pipefail
 
   : "${IDF_PATH:?ERR: brak IDF_PATH w obrazie}"

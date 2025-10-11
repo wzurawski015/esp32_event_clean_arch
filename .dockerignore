@@ -1,14 +1,82 @@
-# VCS
+# --- VCS ------------------------------------------------------
 .git
-.git/*
+.git/**
+.github
+.gitmodules
 
-# Build artefakty
-firmware/**/build
+# --- Sekrety / lokalne pliki środowiskowe (niepotrzebne do obrazu) ---
+.env
 
-# Lokalne HOME kontenera (i tak jest montowane, w obrazie niepotrzebne)
-.idf-docker-home
+# --- Build artefakty ESP-IDF / C/C++ --------------------------
+firmware/**/build/
+**/managed_components/
+**/*.o
+**/*.obj
+**/*.a
+**/*.so
+**/*.dll
+**/*.dylib
+**/*.d
+**/*.dwo
+**/*.elf
+**/*.bin
+**/*.map
+**/*.hex
+**/*.srec
+**/flasher_args.json
+**/flash_project_args
+**/flash_args
+**/flash_app_args
+**/flash_bootloader_args
+**/partition-table-flash_args
+**/app-flash_args
+**/bootloader-flash_args
+**/bootloader-prefix/
+**/gdbinit/
+**/project_description.json
+**/ldgen_libraries
+**/ldgen_libraries.in
+**/x509_crt_bundle.S
+**/compile_commands.json
 
-# Systemowe śmieci
+# Skonfigurowane SDK (trzymamy tylko defaults)
+firmware/projects/**/sdkconfig
+firmware/projects/**/sdkconfig.old
+firmware/projects/**/sdkconfig.*.bak
+!firmware/projects/**/sdkconfig.defaults
+!firmware/projects/**/sdkconfig.*.defaults
+
+# --- Cache / HOME kontenera / narzędzia -----------------------
+.idf-docker-home/
+.espressif/
+**/.ccache/
+**/.cache/
+**/__pycache__/
+**/*.pyc
+
+# --- Edytory / IDE / systemowe śmieci -------------------------
+**/.vscode/
+**/.idea/
+**/*.iml
+**/*.code-workspace
 **/.DS_Store
-**/.idea
-**/.vscode
+Thumbs.db
+*~
+*.swp
+*.swo
+
+# --- Doxygen / Sphinx / docs (generowane) ---------------------
+docs/html/
+docs/latex/
+docs/xml/
+docs/_build/
+
+# --- Logi / archiwa -------------------------------------------
+**/log/
+**/*.log
+**/log/idf_py_stdout_output_*
+**/log/idf_py_stderr_output_*
+*.zip
+*.7z
+*.tar
+*.tar.gz

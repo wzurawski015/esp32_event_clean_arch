@@ -1,26 +1,33 @@
-# --- Ogólne śmieci systemowe/edytory ---
+# --- Ogólne śmieci systemowe/edytory --------------------------
 .DS_Store
 Thumbs.db
+*~
 *.swp
 *.swo
-*~
-/.cache/
-.ccls-cache/
-.clangd/
-.vscode/
+
+# --- Workspace / IDE ------------------------------------------
+/.vscode/
 .idea/
 *.iml
 *.code-workspace
+.ccls-cache/
+.clangd/
+cmake-build-*/
+.vs/
+tags
 
-# --- Python (skrypty pomocnicze) ---
-venv/
-.venv/
-env/
+# --- Python (skrypty pomocnicze) ------------------------------
 __pycache__/
 *.pyc
+.venv/
+venv/
+env/
+.mypy_cache/
+.pytest_cache/
 
-# --- ESP-IDF / CMake: artefakty budowania (gdziekolwiek) ---
+# --- ESP-IDF / CMake: artefakty (gdziekolwiek) ----------------
 **/build/
+**/managed_components/
 **/CMakeFiles/
 **/CMakeCache.txt
 **/cmake_install.cmake
@@ -29,6 +36,7 @@ __pycache__/
 **/.ninja_deps
 **/.ninja_log
 **/compile_commands.json
+CMakeUserPresets.json
 
 # Obiekty/archiwa/biblioteki
 **/*.o
@@ -37,6 +45,8 @@ __pycache__/
 **/*.so
 **/*.dll
 **/*.dylib
+**/*.d
+**/*.dwo
 
 # Obrazy i mapy aplikacji
 **/*.bin
@@ -56,35 +66,43 @@ __pycache__/
 **/bootloader-flash_args
 **/bootloader-prefix/
 **/gdbinit/
-**/config.env
 **/project_description.json
 **/ldgen_libraries
 **/ldgen_libraries.in
 
-# Skonfigurowane SDK (utrzymuj tylko sdkconfig.defaults w repo)
+# Skonfigurowane SDK (utrzymuj tylko defaults w repo)
 firmware/projects/**/sdkconfig
 firmware/projects/**/sdkconfig.old
 firmware/projects/**/sdkconfig.*.bak
+!firmware/projects/**/sdkconfig.defaults
+!firmware/projects/**/sdkconfig.*.defaults
 
-# Wygenerowane bundlowanie certów (czasem ląduje poza build/)
+# Bundlowanie certów (czasem ląduje poza build/)
 **/x509_crt_bundle.S
 
-# --- Doxygen (generowane) ---
+# Doxygen / Sphinx (generowane)
 docs/html/
 docs/latex/
 docs/xml/
+docs/_build/
 
-# --- Inne tymczasowe ---
-*.d
-*.dwo
-
-# Archiwa / logi
+# Inne tymczasowe / narzędzia / logi
+*.gcno
+*.gcda
+*.gcov
+gmon.out
+core
+vgcore.*
 *.zip
 *.7z
+*.tar
 *.tar.gz
+**/log/
+**/*.log
 **/log/idf_py_stdout_output_*
 **/log/idf_py_stderr_output_*
 
-# --- ESP-IDF Docker home / ccache (nie wrzucamy do repo) ---
+# ESP-IDF Docker home / ccache (nie wrzucamy do repo)
 .idf-docker-home/
 **/.ccache/
+.espressif/

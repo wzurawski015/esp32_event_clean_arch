@@ -7,7 +7,7 @@
  *  - Ring-buffer:
  *      - stałorozmiarowy, circular, chroniony krótką sekcją krytyczną (portMUX),
  *      - przechowuje **pełne linie** z nagłówkiem „(ts) tag: ...\n”,
- *      - publiczne API: ::infra_log_rb_stat(), ::infra_log_rb_clear(), ::infra_log_rb_snapshot(), ::infra_log_rb_tail().
+ *      - publiczne API: \ref infra_log_rb_stat, \ref infra_log_rb_clear, \ref infra_log_rb_snapshot, \ref infra_log_rb_tail.
  *
  * @par Konfiguracja (menuconfig)
  *  - Components → Infrastructure logging:

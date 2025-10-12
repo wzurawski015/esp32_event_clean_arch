@@ -60,6 +60,7 @@ port_err_t i2c_bus_probe_addr(i2c_bus_t* bus,
 
 /**
  * @brief Skanowanie zakresu adresów; wpisuje znalezione adresy do @p out_found.
+ * @param bus   Uchwyt magistrali utworzony przez i2c_bus_create().
  * @param start  Pierwszy adres (zalecane >= 0x03)
  * @param end    Ostatni adres (zalecane <= 0x77)
  * @param timeout_ms  Timeout pojedynczej próby

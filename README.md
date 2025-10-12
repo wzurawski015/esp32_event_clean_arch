@@ -111,7 +111,7 @@ idf.py -p "$(./scripts/find-port.sh)" flash monitor
 3. [Struktura repo i komponenty](#struktura-repo-i-komponenty)
 4. [Skrypty deweloperskie](#skrypty-deweloperskie)
 5. [Konfiguracja: `sdkconfig*.defaults`](#konfiguracja-sdkconfigdefaults)
-6. [Połączenia sprzętowe](#połączenia-sprzetowe)
+6. [Polaczenia sprzetowe](#polaczenia-sprzetowe)
 7. [Monitor, REPL i logowanie](#monitor-repl-i-logowanie)
 8. [Docker & wersje IDF](#docker--wersje-idf)
 9. [Generowanie dokumentacji](#generowanie-dokumentacji)
@@ -181,7 +181,7 @@ Projekty przykładowe:
   DOCTOR_AUTOFIX_DEFAULTS=1 ./scripts/doctor.sh
   ```
 
-## Połączenia sprzętowe {#polaczenia-sprzetowe}
+## Polaczenia sprzetowe {#polaczenia-sprzetowe}
 - **DFRobot LCD1602 RGB (DFR0464 v2.0)**: 3V3 / GND, I²C: domyślnie **GPIO10/11 (C6)**, adresy: `LCD=0x3E`, `RGB=0x62` lub `0x2D`.
 - **DS18B20**: `DQ` → wybrany GPIO + rezystor **4.7 kΩ** do 3V3, zasilanie 3V3/GND.
 

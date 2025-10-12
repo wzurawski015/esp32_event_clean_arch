@@ -1,19 +1,31 @@
-# Doxygen config
+# --- Doxygen (root) ----------------------------------------------------------------
 PROJECT_NAME           = "ESP32 Event-Driven Clean Architecture"
 OUTPUT_DIRECTORY       = docs
+CREATE_SUBDIRS         = NO
 OPTIMIZE_OUTPUT_FOR_C  = YES
 EXTRACT_ALL            = YES
-INPUT                  = firmware/components                          firmware/projects/demo_hello_ev/main                          firmware/projects/demo_lcd_rgb/main                          firmware/projects/demo_ds18b20_ev/main                          README.md
+
+# Wejścia
+INPUT                  = \
+  firmware/components \
+  firmware/projects/demo_hello_ev/main \
+  firmware/projects/demo_lcd_rgb/main \
+  firmware/projects/demo_ds18b20_ev/main \
+  README.md
 RECURSIVE              = YES
 FILE_PATTERNS          = *.h *.c *.md
+EXTENSION_MAPPING      = md=markdown
+MARKDOWN_SUPPORT       = YES
+USE_MDFILE_AS_MAINPAGE = README.md
+
+# Język / hałas
 OUTPUT_LANGUAGE        = Polish
-GENERATE_HTML          = YES
-GENERATE_LATEX         = NO
 QUIET                  = YES
 
+# Graphviz
 HAVE_DOT               = YES
 DOT_IMAGE_FORMAT       = svg
 CALL_GRAPH             = YES
 CALLER_GRAPH           = YES
 UML_LOOK               = YES
-DOT_TRANSPARENT        = YES
+# DOT_TRANSPARENT      = YES  # (USUNIĘTE — przestarzałe)

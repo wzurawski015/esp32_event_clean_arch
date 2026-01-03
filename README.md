@@ -88,11 +88,11 @@ ESPPORT=$(./scripts/find-port.sh) ./scripts/idf.sh -p "${ESPPORT}" -b "${MONBAUD
 
 ### 0.F Zmiana wersji ESP‑IDF {#zmiana-wersji-idf}
 ```bash
-# Zbuduj obraz z nową wersją (autopinning digesta do .env)
-IDF_TAG=5.5.1 ./scripts/build-docker.sh
+# Zbuduj obraz z nową wersją (autopinning digesta do .env, SSOT)
+IDF_TAG=${IDF_TAG:-5.5.2} ./scripts/build-docker.sh
 
 # Użyj konkretnego obrazu na czas komendy (opcjonalnie)
-IDF_IMAGE="esp32-idf:5.5.1-docs" ./scripts/idf.sh --version
+IDF_IMAGE="${IDF_IMAGE}" ./scripts/idf.sh --version
 ```
 
 ### 0.G Wariant „native” (bez Dockera) {#bez-dockera}
@@ -146,7 +146,7 @@ Projekty przykładowe:
 - `firmware/projects/demo_ds18b20_ev` — czujnik temperatury DS18B20.
 
 ## Skrypty deweloperskie {#skrypty-deweloperskie}
-- **`scripts/build-docker.sh`** — buduje obraz `IDF_IMAGE` (domyślnie `esp32-idf:5.5.1-docs`), **autopinuje digest** do `.env`.
+- **`scripts/build-docker.sh`** — buduje obraz `IDF_IMAGE` (domyślnie `esp32-idf:5.5.2-docs`), **autopinuje digest** do `.env`.
 - **`scripts/doctor.sh`** — szybka diagnostyka (Docker, obraz, HOME mount, port szeregowy, `idf.sh --version`, pliki defaults).
 - **`scripts/find-port.sh`** — wykrywa port:
   - Linux: preferuje stabilne `/dev/serial/by-id/*` (w tym `*-if00*`), dalej najnowszy `ttyUSB*`/`ttyACM*`,
@@ -197,7 +197,7 @@ Projekty przykładowe:
 ## Docker & wersje IDF {#docker--wersje-idf}
 - Obraz budujesz skryptem **`scripts/build-docker.sh`** (dodaje **Doxygen/Graphviz**).
 - Skrypt **autopinuje digest** konkretnej platformy do `.env` jako `IDF_DIGEST`.
-- Domyślny obraz to `esp32-idf:5.5.1-docs`. Możesz użyć oficjalnego `espressif/idf:v5.5.1`, ale wtedy **brak** Doxygen/Graphviz.
+- Domyślny obraz to `esp32-idf:5.5.2-docs`. Możesz użyć oficjalnego `espressif/idf:v5.5.2`, ale wtedy **brak** Doxygen/Graphviz.
 - Zmiana wersji: uruchom ponownie `./scripts/build-docker.sh` z `IDF_TAG=<nowa>`.
 
 ## Generowanie dokumentacji {#generowanie-dokumentacji}
@@ -241,8 +241,8 @@ TARGET=esp32c6 CONSOLE=uart ./scripts/flash-monitor.sh
 | `ESPPORT` | port szeregowy | `/dev/ttyUSB0`, `/dev/ttyACM0` |
 | `ESPBAUD` | baudrate do flash | `921600` |
 | `MONBAUD` | baudrate monitora | `115200` |
-| `IDF_IMAGE` | obraz Dockera | `esp32-idf:5.5.1-docs` |
-| `IDF_TAG` / `IDF_DIGEST` | pin wersji IDF | `5.5.1` / `sha256:...` |
+| `IDF_IMAGE` | obraz Dockera | `esp32-idf:5.5.2-docs` |
+| `IDF_TAG` / `IDF_DIGEST` | pin wersji IDF | `5.5.2` / `sha256:...` |
 | `IDF_MONITOR_FILTER` | filtr logów monitora | `APP:D *:I` |
 
 ---

@@ -26,7 +26,7 @@ mkdir -p "${DOCKER_HOME_MOUNT}/.espressif" \
          "${DOCKER_HOME_MOUNT}/.cache/ccache" \
          "${DOCKER_HOME_MOUNT}/.ccache"
 
-exec docker run --rm -it --entrypoint "" \
+exec docker run --rm -i "${tty_args[@]}" --entrypoint "" \
   --user "$(id -u)":"$(id -g)" \
   -e HOME="${DOCKER_HOME}" \
   -v "${ROOT}:/work" \

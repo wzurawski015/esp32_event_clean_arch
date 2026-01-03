@@ -22,7 +22,7 @@ printf "INFO - IDF_IMAGE=%s  IDF_TAG=%s  IDF_DIGEST=%s\n" "$IDF_IMAGE" "$IDF_TAG
 [[ -n "${IDF_DIGEST:-}"  ]] || er "IDF_DIGEST niewypełniony w .env (sha256:...)"
 
 # 2) Dockerfile korzysta z ARG i z @${IDF_DIGEST} we FROM?
-DKR="${ROOT}/Docker/Dockerfile.idf-5.5.1"
+DKR="${ROOT}/Docker/Dockerfile.idf-${IDF_TAG}"
 if [[ -f "$DKR" ]]; then
   grep -qE '^ARG[[:space:]]+IDF_TAG'    "$DKR" || er "Dockerfile: brak 'ARG IDF_TAG'"
   grep -qE '^ARG[[:space:]]+IDF_DIGEST' "$DKR" || er "Dockerfile: brak 'ARG IDF_DIGEST'"

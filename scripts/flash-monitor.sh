@@ -12,6 +12,13 @@ build_dir="${proj_dir}/build"
 if [[ -z "${ESPPORT:-}" ]]; then
   ESPPORT="$("${ROOT}/scripts/find-port.sh")" || { echo "ERR: nie wykryłem portu!" >&2; exit 2; }
 fi
+
+# Twarda walidacja portu (żeby nie iść dalej w „złe /dev/…”)
+if [[ ! -e "${ESPPORT}" ]]; then
+  echo "ERR: ESPPORT='${ESPPORT}' nie istnieje. Sprawdź usbipd/WSL lub podaj poprawny port." >&2
+  exit 2
+fi
+
 echo "Używam portu: ${ESPPORT}"
 
 # Zadbaj o zgodność targetu (bez resetu clean — szybciej)

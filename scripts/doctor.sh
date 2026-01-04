@@ -21,9 +21,23 @@ printf "INFO - IDF_IMAGE=%s  IDF_TAG=%s  IDF_DIGEST=%s\n" "$IDF_IMAGE" "$IDF_TAG
 [[ -n "${IDF_TAG:-}"     ]] || er "IDF_TAG niewypełniony w .env"
 [[ -n "${IDF_DIGEST:-}"  ]] || er "IDF_DIGEST niewypełniony w .env (sha256:...)"
 
-# 2) Dockerfile korzysta z ARG i z @${IDF_DIGEST} we FROM?
-DKR="${ROOT}/Docker/Dockerfile.idf-${IDF_TAG}"
-if [[ -f "$DKR" ]]; then
+# 2) Dockerfile: wybierz wg IDF_TAG (jak w build-docker.sh)
+DKR_CANDIDATES=(
+  "${ROOT}/Docker/Dockerfile.idf-${IDF_TAG}"
+  "${ROOT}/Docker/Dockerfile.idf"
+  "${ROOT}/Docker/Dockerfile.idf-5.5.1"
+)
+DKR=""
+for f in "${DKR_CANDIDATES[@]}"; do
+  [[ -f "${f}" ]] && { DKR="${f}"; break; }
+done
+
+if [[ -n "${DKR}" ]]; then
+  ok "Dockerfile: używam $(python3 - <<PY
+import os,sys
+print(os.path.relpath(sys.argv[1], sys.argv[2]))
+PY
+"$DKR" "$ROOT")"
   grep -qE '^ARG[[:space:]]+IDF_TAG'    "$DKR" || er "Dockerfile: brak 'ARG IDF_TAG'"
   grep -qE '^ARG[[:space:]]+IDF_DIGEST' "$DKR" || er "Dockerfile: brak 'ARG IDF_DIGEST'"
   if grep -qE '^FROM[[:space:]]+espressif/idf:v\$\{IDF_TAG\}@\$\{IDF_DIGEST\}' "$DKR"; then
@@ -32,7 +46,7 @@ if [[ -f "$DKR" ]]; then
     er "Dockerfile: FROM nie wykorzystuje @\${IDF_DIGEST} (pin jest wymagany)"
   fi
 else
-  er "Brak pliku Docker/Dockerfile.idf-5.5.1"
+  er "Brak Dockerfile: oczekiwano Docker/Dockerfile.idf-${IDF_TAG} lub Docker/Dockerfile.idf"
 fi
 
 # 3) Czy obraz lokalny istnieje (zbudowany twoim skryptem)?

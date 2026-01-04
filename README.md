@@ -89,7 +89,7 @@ ESPPORT=$(./scripts/find-port.sh) ./scripts/idf.sh -p "${ESPPORT}" -b "${MONBAUD
 ### 0.F Zmiana wersji ESP‑IDF {#zmiana-wersji-idf}
 ```bash
 # Zbuduj obraz z nową wersją (autopinning digesta do .env, SSOT)
-IDF_TAG=${IDF_TAG:-5.5.2} ./scripts/build-docker.sh
+IDF_TAG=${IDF_TAG:-${IDF_TAG}} ./scripts/build-docker.sh
 
 # Użyj konkretnego obrazu na czas komendy (opcjonalnie)
 IDF_IMAGE="${IDF_IMAGE}" ./scripts/idf.sh --version

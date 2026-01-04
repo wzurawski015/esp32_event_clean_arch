@@ -3,6 +3,25 @@ set -Eeuo pipefail
 # shellcheck disable=SC1091
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/common.env.sh"
 
+# Dockerfile selection (czołgowo odporne):
+# 1) Docker/Dockerfile.idf-${IDF_TAG}   (np. Dockerfile.idf-5.5.2)
+# 2) Docker/Dockerfile.idf              (jeden, “uniwersalny”)
+# 3) Docker/Dockerfile.idf-5.5.1        (legacy fallback)
+#
+DOCKERFILE_CANDIDATES=(
+  "${ROOT}/Docker/Dockerfile.idf-${IDF_TAG}"
+  "${ROOT}/Docker/Dockerfile.idf"
+  "${ROOT}/Docker/Dockerfile.idf-5.5.1"
+)
+DOCKERFILE=""
+for f in "${DOCKERFILE_CANDIDATES[@]}"; do
+  if [[ -f "${f}" ]]; then
+    DOCKERFILE="${f}"
+    break
+  fi
+done
+[[ -n "${DOCKERFILE}" ]] || { echo "ERR: nie znaleziono Dockerfile.idf (sprawdz Docker/)" >&2; exit 2; }
+
 case "$(uname -m)" in
   x86_64|amd64) WANT_ARCH="amd64" ;;
   aarch64|arm64) WANT_ARCH="arm64" ;;
@@ -51,7 +70,7 @@ if docker buildx version >/dev/null 2>&1; then
     --build-arg IDF_DIGEST="${IDF_DIGEST}" \
     --label org.opencontainers.image.source="$(git -C "${ROOT}" config --get remote.origin.url || echo unknown)" \
     --label org.opencontainers.image.revision="$(git -C "${ROOT}" rev-parse --short=12 HEAD || echo unknown)" \
-    -f "${ROOT}/Docker/Dockerfile.idf-5.5.1" \
+    -f "${DOCKERFILE}" \
     -t "${IDF_IMAGE}" "${ROOT}"
 else
   echo "WARN: docker buildx nie znaleziony — używam klasycznego 'docker build'."

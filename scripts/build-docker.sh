@@ -77,7 +77,7 @@ else
   docker build \
     --build-arg IDF_TAG="${IDF_TAG}" \
     --build-arg IDF_DIGEST="${IDF_DIGEST}" \
-    -f "${ROOT}/Docker/Dockerfile.idf-5.5.1" \
+    -f "${DOCKERFILE}" \
     -t "${IDF_IMAGE}" "${ROOT}"
 fi
 

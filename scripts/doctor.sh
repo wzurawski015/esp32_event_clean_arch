@@ -2,6 +2,7 @@
 set -Eeuo pipefail
 # shellcheck disable=SC1091
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/common.env.sh"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 ok(){ printf "OK   - %s\n" "$*"; }
 wr(){ printf "WARN - %s\n" "$*" >&2; }
@@ -21,6 +22,15 @@ printf "INFO - IDF_IMAGE=%s  IDF_TAG=%s  IDF_DIGEST=%s\n" "$IDF_IMAGE" "$IDF_TAG
 [[ -n "${IDF_TAG:-}"     ]] || er "IDF_TAG niewypełniony w .env"
 [[ -n "${IDF_DIGEST:-}"  ]] || er "IDF_DIGEST niewypełniony w .env (sha256:...)"
 
+relpath() {
+  local p="$1" base="$2"
+  if command -v realpath >/dev/null 2>&1; then
+    realpath --relative-to="$base" "$p" 2>/dev/null && return 0
+  fi
+  # fallback bez relpath
+  echo "$p"
+}
+
 # 2) Dockerfile: wybierz wg IDF_TAG (jak w build-docker.sh)
 DKR_CANDIDATES=(
   "${ROOT}/Docker/Dockerfile.idf-${IDF_TAG}"
@@ -33,11 +43,11 @@ for f in "${DKR_CANDIDATES[@]}"; do
 done
 
 if [[ -n "${DKR}" ]]; then
-  ok "Dockerfile: używam $(python3 - <<PY
-import os,sys
-print(os.path.relpath(sys.argv[1], sys.argv[2]))
-PY
-"$DKR" "$ROOT")"
+  if [[ ! -r "${DKR}" ]]; then
+    er "Dockerfile istnieje, ale brak prawa odczytu: ${DKR} (napraw: chmod 644 '${DKR}')"
+  else
+    ok "Dockerfile: używam $(relpath "${DKR}" "${ROOT}")"
+  fi
   grep -qE '^ARG[[:space:]]+IDF_TAG'    "$DKR" || er "Dockerfile: brak 'ARG IDF_TAG'"
   grep -qE '^ARG[[:space:]]+IDF_DIGEST' "$DKR" || er "Dockerfile: brak 'ARG IDF_DIGEST'"
   if grep -qE '^FROM[[:space:]]+espressif/idf:v\$\{IDF_TAG\}@\$\{IDF_DIGEST\}' "$DKR"; then

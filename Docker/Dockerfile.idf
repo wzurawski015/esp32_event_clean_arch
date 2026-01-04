@@ -1,0 +1,12 @@
+# syntax=docker/dockerfile:1.7
+ARG IDF_TAG
+ARG IDF_DIGEST
+FROM espressif/idf:v${IDF_TAG}@${IDF_DIGEST}
+
+ARG DEBIAN_FRONTEND=noninteractive
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends doxygen graphviz \
+ && rm -rf /var/lib/apt/lists/*
+
+ENV IDF_CCACHE_ENABLE=1
+WORKDIR /work

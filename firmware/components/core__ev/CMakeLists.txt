@@ -4,6 +4,7 @@ idf_component_register(
   REQUIRES
     freertos
     core__leasepool
+    esp_rom
 )
 
 # --- Doxygen target dla core__ev (opcjonalnie, z Graphviz) ---

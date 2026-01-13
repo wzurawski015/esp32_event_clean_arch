@@ -1,9 +1,24 @@
 #include "core_ev.h"
 #include <string.h>
-#if defined(CONFIG_CORE_EV_SCHEMA_GUARD) && CONFIG_CORE_EV_SCHEMA_GUARD
+
+#if (defined(CONFIG_CORE_EV_SCHEMA_GUARD) && CONFIG_CORE_EV_SCHEMA_GUARD) || \
+    (defined(CONFIG_CORE_EV_SCHEMA_SELFTEST_ON_BOOT) && CONFIG_CORE_EV_SCHEMA_SELFTEST_ON_BOOT)
+#include <stdio.h>
 #include <stdlib.h>
-#include "esp_rom_sys.h"   // esp_rom_printf (bezpieczniejsze niż printf w ścieżkach awaryjnych/ISR)
+#if defined(ESP_PLATFORM)
+#include "esp_rom_sys.h"
 #endif
+#endif
+
+#if (defined(CONFIG_CORE_EV_SCHEMA_GUARD) && CONFIG_CORE_EV_SCHEMA_GUARD) || \
+    (defined(CONFIG_CORE_EV_SCHEMA_SELFTEST_ON_BOOT) && CONFIG_CORE_EV_SCHEMA_SELFTEST_ON_BOOT)
+#  if defined(ESP_PLATFORM)
+#    define EV_DIAG_PRINTF(...) esp_rom_printf(__VA_ARGS__)
+#  else
+#    define EV_DIAG_PRINTF(...) printf(__VA_ARGS__)
+#  endif
+#endif
+
 #include "freertos/FreeRTOS.h"
 #include "freertos/portmacro.h"
 #include "freertos/task.h"
@@ -48,6 +63,20 @@ static inline uint32_t now_ms(void)
     return (uint32_t)(xTaskGetTickCount() * portTICK_PERIOD_MS);
 }
 
+#if (defined(CONFIG_CORE_EV_SCHEMA_GUARD) && CONFIG_CORE_EV_SCHEMA_GUARD) || \
+    (defined(CONFIG_CORE_EV_SCHEMA_SELFTEST_ON_BOOT) && CONFIG_CORE_EV_SCHEMA_SELFTEST_ON_BOOT)
+static const char* ev_kind_str_(ev_kind_t k)
+{
+    switch (k) {
+        case EVK_NONE:   return "NONE";
+        case EVK_COPY:   return "COPY";
+        case EVK_LEASE:  return "LEASE";
+        case EVK_STREAM: return "STREAM";
+        default:         return "?";
+    }
+}
+#endif
+
 /* ===================== PR2: schema/meta lookup ===================== */
 
 static const ev_meta_t s_ev_meta[] = {
@@ -78,17 +107,6 @@ const char* ev_code_name(ev_src_t src, uint16_t code)
 
 #if defined(CONFIG_CORE_EV_SCHEMA_GUARD) && CONFIG_CORE_EV_SCHEMA_GUARD
 
-static const char* ev_kind_str_(ev_kind_t k)
-{
-    switch (k) {
-        case EVK_NONE:   return "NONE";
-        case EVK_COPY:   return "COPY";
-        case EVK_LEASE:  return "LEASE";
-        case EVK_STREAM: return "STREAM";
-        default:         return "?";
-    }
-}
-
 static void ev_schema_abort_(const char* api,
                              ev_src_t src,
                              uint16_t code,
@@ -96,19 +114,19 @@ static void ev_schema_abort_(const char* api,
                              const char* why)
 {
     if (meta) {
-        esp_rom_printf("EV SCHEMA VIOLATION: %s: %s (src=0x%04X code=0x%04X name=%s kind=%s)\n",
-                       api,
-                       why,
-                       (unsigned)src,
-                       (unsigned)code,
-                       meta->name ? meta->name : "?",
-                       ev_kind_str_(meta->kind));
+        EV_DIAG_PRINTF("EV SCHEMA VIOLATION: %s: %s (src=0x%04X code=0x%04X name=%s kind=%s)\n",
+               api,
+               why,
+               (unsigned)src,
+               (unsigned)code,
+               meta->name ? meta->name : "?",
+               ev_kind_str_(meta->kind));
     } else {
-        esp_rom_printf("EV SCHEMA VIOLATION: %s: %s (src=0x%04X code=0x%04X name=EV_UNKNOWN)\n",
-                       api,
-                       why,
-                       (unsigned)src,
-                       (unsigned)code);
+        EV_DIAG_PRINTF("EV SCHEMA VIOLATION: %s: %s (src=0x%04X code=0x%04X name=EV_UNKNOWN)\n",
+               api,
+               why,
+               (unsigned)src,
+               (unsigned)code);
     }
     abort();
 }
@@ -167,6 +185,102 @@ static void ev_schema_require_none_payload_(const char* api,
 }
 
 #endif // CONFIG_CORE_EV_SCHEMA_GUARD
+
+/* ===================== PR2.9: schema self-test (boot-time) ===================== */
+
+#if defined(CONFIG_CORE_EV_SCHEMA_SELFTEST_ON_BOOT) && CONFIG_CORE_EV_SCHEMA_SELFTEST_ON_BOOT
+
+static bool ev_schema_is_critical_name_(const char* name)
+{
+    if (!name) return false;
+
+    // Krytyczne: *_ERROR*, *_START* oraz EV_LOG_NEW (log-line jest API systemowe).
+    if (strstr(name, "ERROR")) return true;
+    if (strstr(name, "START")) return true;
+    if (strcmp(name, "EV_LOG_NEW") == 0) return true;
+
+    return false;
+}
+
+static void ev_schema_selftest_or_abort_(void)
+{
+    static bool s_done = false;
+    if (s_done) return;
+    s_done = true;
+
+    int issues = 0;
+
+    // 1) duplikaty (src,code)
+    for (size_t i = 0; i < s_ev_meta_len; ++i) {
+        for (size_t j = i + 1; j < s_ev_meta_len; ++j) {
+            if (s_ev_meta[i].src == s_ev_meta[j].src && s_ev_meta[i].code == s_ev_meta[j].code) {
+                EV_DIAG_PRINTF("EV SCHEMA SELFTEST FAIL: dup src+code: src=0x%04X code=0x%04X : %s <-> %s\n",
+                               (unsigned)s_ev_meta[i].src, (unsigned)s_ev_meta[i].code,
+                               s_ev_meta[i].name ? s_ev_meta[i].name : "?",
+                               s_ev_meta[j].name ? s_ev_meta[j].name : "?");
+                issues++;
+            }
+        }
+    }
+
+    // 2) duplikaty name
+    for (size_t i = 0; i < s_ev_meta_len; ++i) {
+        if (!s_ev_meta[i].name || s_ev_meta[i].name[0] == '\0') continue;
+        for (size_t j = i + 1; j < s_ev_meta_len; ++j) {
+            if (!s_ev_meta[j].name || s_ev_meta[j].name[0] == '\0') continue;
+            if (strcmp(s_ev_meta[i].name, s_ev_meta[j].name) == 0) {
+                EV_DIAG_PRINTF("EV SCHEMA SELFTEST FAIL: dup name: %s (src=0x%04X code=0x%04X) and (src=0x%04X code=0x%04X)\n",
+                               s_ev_meta[i].name,
+                               (unsigned)s_ev_meta[i].src, (unsigned)s_ev_meta[i].code,
+                               (unsigned)s_ev_meta[j].src, (unsigned)s_ev_meta[j].code);
+                issues++;
+            }
+        }
+    }
+
+    // 3) sanity per-entry: name/kind/doc (dla krytycznych)
+    for (size_t i = 0; i < s_ev_meta_len; ++i) {
+        const ev_meta_t* m = &s_ev_meta[i];
+
+        if (!m->name || m->name[0] == '\0') {
+            EV_DIAG_PRINTF("EV SCHEMA SELFTEST FAIL: empty name: idx=%u src=0x%04X code=0x%04X\n",
+                           (unsigned)i,
+                           (unsigned)m->src,
+                           (unsigned)m->code);
+            issues++;
+        }
+
+        if ((unsigned)m->kind > (unsigned)EVK_STREAM) {
+            EV_DIAG_PRINTF("EV SCHEMA SELFTEST FAIL: invalid kind: idx=%u name=%s kind=%u\n",
+                           (unsigned)i,
+                           m->name ? m->name : "?",
+                           (unsigned)m->kind);
+            issues++;
+        }
+
+        if (ev_schema_is_critical_name_(m->name)) {
+            if (!m->doc || m->doc[0] == '\0') {
+                EV_DIAG_PRINTF("EV SCHEMA SELFTEST FAIL: missing doc (CRITICAL): name=%s src=0x%04X code=0x%04X kind=%s\n",
+                               m->name ? m->name : "?",
+                               (unsigned)m->src,
+                               (unsigned)m->code,
+                               ev_kind_str_(m->kind));
+                issues++;
+            }
+        }
+    }
+
+    if (issues == 0) {
+        EV_DIAG_PRINTF("EV schema selftest: OK (entries=%u)\n", (unsigned)s_ev_meta_len);
+        return;
+    }
+
+    EV_DIAG_PRINTF("EV schema selftest: FAIL (issues=%d, entries=%u) -> abort()\n",
+                   issues, (unsigned)s_ev_meta_len);
+    abort();
+}
+
+#endif // CONFIG_CORE_EV_SCHEMA_SELFTEST_ON_BOOT
 
 /* Wysyła ramkę do wszystkich subów; zwraca liczbę rzeczywistych dostarczeń. */
 static uint16_t ev_broadcast(const ev_msg_t* m)
@@ -250,6 +364,10 @@ void ev_init(void)
     s_posts_drop  = 0;
     s_enq_fail    = 0;
     EV_CS_EXIT();
+
+#if defined(CONFIG_CORE_EV_SCHEMA_SELFTEST_ON_BOOT) && CONFIG_CORE_EV_SCHEMA_SELFTEST_ON_BOOT
+    ev_schema_selftest_or_abort_();
+#endif
 }
 
 bool ev_subscribe(ev_queue_t* out_q, size_t depth)
@@ -431,3 +549,4 @@ void ev_reset_stats(void)
     s_enq_fail   = 0;
     EV_CS_EXIT();
 }
+

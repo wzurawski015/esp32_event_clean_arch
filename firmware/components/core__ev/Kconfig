@@ -16,4 +16,18 @@ config CORE_EV_SCHEMA_GUARD
       Naruszenie kontraktu kończy się fail-fast (abort()).
       Wyłącz w buildach produkcyjnych, jeśli chcesz zero narzutu / bez abortów.
 
+config CORE_EV_SCHEMA_SELFTEST_ON_BOOT
+    bool "Run schema self-test once at ev_init()"
+    default y if CORE_EV_SCHEMA_GUARD
+    default n
+    help
+      PR2.9: Przy pierwszym wywołaniu ev_init() wykonywany jest self-test schemy:
+        - duplikaty (src, code)
+        - duplikaty name
+        - puste name
+        - niepoprawny kind
+        - brak doc dla zdarzeń krytycznych (heurystyka jak w 'evstat check')
+      Wykrycie problemu kończy się fail-fast (abort()).
+      Opcja developerska/warsztatowa — w produkcji zwykle wyłącz.
+
 endmenu

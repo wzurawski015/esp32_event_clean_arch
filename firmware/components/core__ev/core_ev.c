@@ -1,8 +1,8 @@
 #include "core_ev.h"
 #include <string.h>
 #if defined(CONFIG_CORE_EV_SCHEMA_GUARD) && CONFIG_CORE_EV_SCHEMA_GUARD
-#include <stdio.h>
 #include <stdlib.h>
+#include "esp_rom_sys.h"   // esp_rom_printf (bezpieczniejsze niż printf w ścieżkach awaryjnych/ISR)
 #endif
 #include "freertos/FreeRTOS.h"
 #include "freertos/portmacro.h"
@@ -96,19 +96,19 @@ static void ev_schema_abort_(const char* api,
                              const char* why)
 {
     if (meta) {
-        printf("EV SCHEMA VIOLATION: %s: %s (src=0x%04X code=0x%04X name=%s kind=%s)\n",
-               api,
-               why,
-               (unsigned)src,
-               (unsigned)code,
-               meta->name ? meta->name : "?",
-               ev_kind_str_(meta->kind));
+        esp_rom_printf("EV SCHEMA VIOLATION: %s: %s (src=0x%04X code=0x%04X name=%s kind=%s)\n",
+                       api,
+                       why,
+                       (unsigned)src,
+                       (unsigned)code,
+                       meta->name ? meta->name : "?",
+                       ev_kind_str_(meta->kind));
     } else {
-        printf("EV SCHEMA VIOLATION: %s: %s (src=0x%04X code=0x%04X name=EV_UNKNOWN)\n",
-               api,
-               why,
-               (unsigned)src,
-               (unsigned)code);
+        esp_rom_printf("EV SCHEMA VIOLATION: %s: %s (src=0x%04X code=0x%04X name=EV_UNKNOWN)\n",
+                       api,
+                       why,
+                       (unsigned)src,
+                       (unsigned)code);
     }
     abort();
 }

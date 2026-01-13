@@ -42,9 +42,7 @@
 #include <errno.h>
 
 /* komendy: evstat + schema */
-#include "core_ev.h"
-/* PR2: schema (EV_SCHEMA) */
-#include "core_ev_schema.h"
+#include "core_ev.h"   // EV_SCHEMA pochodzi z core_ev.h (SSOT)
 
 #define TAG "LOGCLI"
 
@@ -703,6 +701,24 @@ static int cmd_evstat_check(int argc, char** argv)
 
 static int cmd_evstat(int argc, char **argv)
 {
+    // Help
+    if (argc >= 2 && (!strcmp(argv[1], "-h") || !strcmp(argv[1], "--help"))) {
+        evstat_usage_();
+        return 0;
+    }
+
+    // Reset statów
+    if (argc >= 2 && !strcmp(argv[1], "--reset")) {
+        if (argc != 2) {
+            printf("ERR: --reset nie przyjmuje dodatkowych argumentów\n");
+            evstat_usage_();
+            return 2;
+        }
+        ev_reset_stats();
+        printf("ev: stats reset\n");
+        return 0;
+    }
+
     // Subkomendy: list / show / check
     if (argc >= 2) {
         if (!strcmp(argv[1], "list")) {
@@ -714,26 +730,22 @@ static int cmd_evstat(int argc, char **argv)
         if (!strcmp(argv[1], "check")) {
             return cmd_evstat_check(argc - 1, argv + 1);
         }
-        if (!strcmp(argv[1], "-h") || !strcmp(argv[1], "--help")) {
-            evstat_usage_();
-            return 0;
-        }
     }
 
-    // Reset statów
-    if (argc == 2 && strcmp(argv[1], "--reset") == 0) {
-        ev_reset_stats();
-        printf("ev: stats reset\n");
+    // Statystyki busa (tryb domyślny) — tylko bez argumentów
+    if (argc == 1) {
+        ev_stats_t s;
+        ev_get_stats(&s);
+        printf("ev: subs=%u q_depth_max=%u posts_ok=%u posts_drop=%u enq_fail=%u\n",
+               (unsigned)s.subs, (unsigned)s.q_depth_max,
+               (unsigned)s.posts_ok, (unsigned)s.posts_drop, (unsigned)s.enq_fail);
         return 0;
     }
 
-    // Statystyki busa (jak wcześniej)
-    ev_stats_t s;
-    ev_get_stats(&s);
-    printf("ev: subs=%u q_depth_max=%u posts_ok=%u posts_drop=%u enq_fail=%u\n",
-           (unsigned)s.subs, (unsigned)s.q_depth_max,
-           (unsigned)s.posts_ok, (unsigned)s.posts_drop, (unsigned)s.enq_fail);
-    return 0;
+    // Nieznany tryb/opcja
+    printf("ERR: nieznany tryb/opcja: %s\n", argv[1]);
+    evstat_usage_();
+    return 2;
 }
 
 /* ==================== rejestracja CLI (idempotentna) ==================== */

@@ -103,8 +103,21 @@ TEST_CASE("ev_post_lease: refcount reserved before enqueue (no UAF)", "[core__ev
 
     (void)ev_post_lease(EV_SRC_LOG, EV_LOG_NEW, h, 4);
 
-    TEST_ASSERT_TRUE(ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(1000)) > 0);
-    TEST_ASSERT_TRUE(ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(1000)) > 0);
+    // PANCERNE czekanie: oba taski mogą zdążyć „oddać” notify zanim zaczniemy brać.
+    // ulTaskNotifyTake(pdTRUE, ...) zwraca licznik (>=1) i czyści go do 0.
+    uint32_t total = 0;
+    const TickType_t deadline = xTaskGetTickCount() + pdMS_TO_TICKS(1000);
+
+    while (total < 2u) {
+        const TickType_t now = xTaskGetTickCount();
+        if (now >= deadline) {
+            break;
+        }
+
+        total += ulTaskNotifyTake(pdTRUE, (deadline - now));
+    }
+
+    TEST_ASSERT_EQUAL_UINT32(2u, total);
 
     TEST_ASSERT_TRUE(s_hi_ok);
     TEST_ASSERT_TRUE(s_lo_ok);

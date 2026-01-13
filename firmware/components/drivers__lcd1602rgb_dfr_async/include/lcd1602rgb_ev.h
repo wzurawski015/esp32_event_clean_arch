@@ -7,12 +7,7 @@
 extern "C" {
 #endif
 
-// Komendy LCD (muszą być zgodne z core_ev.h)
-#ifndef EV_LCD_CMD_DRAW_ROW
-#define EV_LCD_CMD_DRAW_ROW  0x3010
-#define EV_LCD_CMD_SET_RGB   0x3011
-#define EV_LCD_CMD_FLUSH     0x3012
-#endif
+// PR2: EV_LCD_CMD_* są zdefiniowane centralnie w core_ev_schema.h (single source of truth)
 
 // Pakowanie RGB do a0 (R | G<<8 | B<<16)
 static inline uint32_t lcd_pack_rgb(uint8_t r, uint8_t g, uint8_t b)

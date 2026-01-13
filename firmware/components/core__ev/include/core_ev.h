@@ -65,30 +65,36 @@ enum {
     EV_SRC_LOG   = 0x06,   ///< strumień logów (mostek vprintf->EV)
 };
 
+
+// PR2: jedno zrodlo prawdy dla zdarzen (X-macro schema + metadane)
+// Zobacz: core_ev_schema.h (EV_SCHEMA).
+#include "core_ev_schema.h"
+
+typedef enum {
+    EVK_NONE = 0,
+    EVK_COPY,
+    EVK_LEASE,
+    EVK_STREAM,
+} ev_kind_t;
+
+// Kody zdarzen generowane z EV_SCHEMA (NAME = CODE)
 enum {
-    // SYS
-    EV_SYS_START     = 0x0001,
-
-    // TIMER
-    EV_TICK_100MS    = 0x1000,
-    EV_TICK_1S       = 0x1001,
-
-    // I2C
-    EV_I2C_DONE      = 0x2000,
-    EV_I2C_ERROR     = 0x2001,
-
-    // LCD
-    EV_LCD_READY     = 0x3001,
-    EV_LCD_UPDATED   = 0x3002,
-    EV_LCD_ERROR     = 0x30FF,
-
-    // DS18B20
-    EV_DS18_READY    = 0x4000,
-    EV_DS18_ERROR    = 0x4001,
-
-    // LOG
-    EV_LOG_NEW       = 0x5000, ///< kompletna linia logu (payload: lease)
+#define X(NAME, SRC, CODE, KIND, DOC) NAME = (CODE),
+    EV_SCHEMA(X)
+#undef X
 };
+
+typedef struct {
+    ev_src_t    src;
+    uint16_t    code;
+    ev_kind_t   kind;
+    const char* name;
+    const char* doc;
+} ev_meta_t;
+
+// Lookup metadanych (src,code) -> meta / nazwa
+const ev_meta_t* ev_meta_find(ev_src_t src, uint16_t code);
+const char* ev_code_name(ev_src_t src, uint16_t code);
 
 /* ===================== RAMKA ZDARZENIA ===================== */
 /** Pojedyncze zdarzenie rozsyłane do subskrybentów. */
@@ -140,6 +146,10 @@ bool ev_post(ev_src_t src, uint16_t code, uint32_t a0, uint32_t a1);
  * a następnie ZAWSZE zwolni ref producenta: `lp_release(h)`.
  * @return true gdy trafiło do ≥1 subskrybenta.
  */
+// Post LEASE payload via LeasePool.
+// Kontrakt: EventBus przejmuje ownership; refcount dla konsumenta jest rezerwowany
+// PRZED enqueue (xQueueSend może przełączyć na wyższy priorytet). Jeśli enqueue fail,
+// bus cofa ref. Publisher zawsze zwalnia swoją referencję; subskrybenci muszą lp_release().
 bool ev_post_lease(ev_src_t src, uint16_t code, lp_handle_t h, uint16_t len);
 
 /**

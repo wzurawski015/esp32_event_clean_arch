@@ -1,8 +1,19 @@
 menu "Core EV (event bus)"
+
 config CORE_EV_MAX_SUBS
     int "Max number of event subscribers"
     range 1 64
     default 12
     help
       Maksymalna liczba subskrybentów event-busa.
+
+config CORE_EV_SCHEMA_GUARD
+    bool "Schema guard in ev_post*() (fail-fast on contract violation)"
+    default y
+    help
+      Gdy włączone, ev_post()/ev_post_lease()/ev_post_from_isr() walidują
+      publikowane zdarzenia względem schemy (kind, itp).
+      Naruszenie kontraktu kończy się fail-fast (abort()).
+      Wyłącz w buildach produkcyjnych, jeśli chcesz zero narzutu / bez abortów.
+
 endmenu

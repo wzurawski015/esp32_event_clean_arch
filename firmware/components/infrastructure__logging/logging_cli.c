@@ -754,7 +754,7 @@ static int cmd_evstat_stat(int argc, char** argv)
     bool per_event = false;
     bool nohdr     = false;
 
-    for (int i = 2; i < argc; i++) {
+    for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--per-event") == 0 || strcmp(argv[i], "--per") == 0) {
             per_event = true;
             continue;

@@ -65,11 +65,7 @@ enum {
     EV_SRC_LOG   = 0x06,   ///< strumień logów (mostek vprintf->EV)
 };
 
-
-// PR2: jedno zrodlo prawdy dla zdarzen (X-macro schema + metadane)
-// Zobacz: core_ev_schema.h (EV_SCHEMA).
-#include "core_ev_schema.h"
-
+/* ===================== SCHEMA: KIND/QOS/FLAGS (SSOT w core_ev_schema.h) ===================== */
 typedef enum {
     EVK_NONE = 0,
     EVK_COPY,
@@ -77,9 +73,25 @@ typedef enum {
     EVK_STREAM,
 } ev_kind_t;
 
+typedef enum {
+    /** Domyślne: jeśli kolejka subskrybenta pełna, nowy event jest porzucony. */
+    EVQ_DROP_NEW = 0,
+    /** Dla eventów stanowych: przy depth==1 bus użyje xQueueOverwrite(). */
+    EVQ_REPLACE_LAST,
+} ev_qos_t;
+
+enum {
+    EVF_NONE     = 0u,
+    EVF_CRITICAL = (1u << 0),
+};
+
+// PR2+: jedno zrodlo prawdy dla zdarzen (X-macro schema + metadane)
+// Zobacz: core_ev_schema.h (EV_SCHEMA).
+#include "core_ev_schema.h"
+
 // Kody zdarzen generowane z EV_SCHEMA (NAME = CODE)
 enum {
-#define X(NAME, SRC, CODE, KIND, DOC) NAME = (CODE),
+#define X(NAME, SRC, CODE, KIND, QOS, FLAGS, DOC) NAME = (CODE),
     EV_SCHEMA(X)
 #undef X
 };
@@ -88,6 +100,8 @@ typedef struct {
     ev_src_t    src;
     uint16_t    code;
     ev_kind_t   kind;
+    ev_qos_t    qos;
+    uint16_t    flags;
     const char* name;
     const char* doc;
 } ev_meta_t;
@@ -95,6 +109,26 @@ typedef struct {
 // Lookup metadanych (src,code) -> meta / nazwa
 const ev_meta_t* ev_meta_find(ev_src_t src, uint16_t code);
 const char* ev_code_name(ev_src_t src, uint16_t code);
+const char* ev_kind_str(ev_kind_t kind);
+const char* ev_qos_str(ev_qos_t qos);
+
+// Metadane całej schemy (indeks == ID w CLI: evstat list/show)
+size_t ev_meta_count(void);
+const ev_meta_t* ev_meta_by_index(size_t idx);
+
+/* ===================== STATYSTYKI PER-EVENT (PR4) ===================== */
+typedef struct {
+    uint32_t posts_ok;    ///< ile publikacji dotarło do ≥1 suba
+    uint32_t posts_drop;  ///< ile publikacji nie dotarło do nikogo
+    uint32_t enq_fail;    ///< ile enqueue nie weszło (sumarycznie po subach)
+    uint32_t delivered;   ///< suma dostarczeń (fanout) dla posts_ok
+} ev_event_stats_t;
+
+/**
+ * @brief Snapshot statystyk per-event (kolejność zgodna z ev_meta_by_index()).
+ * @return liczba wpisów skopiowanych.
+ */
+size_t ev_get_event_stats(ev_event_stats_t* out, size_t max);
 
 /* ===================== RAMKA ZDARZENIA ===================== */
 /** Pojedyncze zdarzenie rozsyłane do subskrybentów. */
@@ -172,7 +206,7 @@ typedef struct {
 void ev_get_stats(ev_stats_t* out);
 
 /**
- * @brief Wyzeruj liczniki statystyk (posts_ok/drop, enq_fail).
+ * @brief Wyzeruj liczniki statystyk globalnych oraz per-event.
  * @note Nie modyfikuje liczby subskrybentów ani q_depth_max.
  */
 void ev_reset_stats(void);

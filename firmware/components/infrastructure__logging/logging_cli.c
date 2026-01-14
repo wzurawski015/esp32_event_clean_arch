@@ -264,11 +264,17 @@ static bool parse_kind_(const char* s, ev_kind_t* out)
     return false;
 }
 
-static const char* ev_api_hint_(ev_kind_t kind)
+static const char* ev_api_hint_(ev_kind_t kind, ev_qos_t qos)
 {
     switch (kind) {
-        case EVK_NONE:   return "NONE  -> ev_post(src, code, 0, 0)";
-        case EVK_COPY:   return "COPY  -> ev_post(src, code, a0, a1)";
+        case EVK_NONE:
+            return (qos == EVQ_REPLACE_LAST)
+                       ? "NONE (REPLACE_LAST) -> ev_post(src, code, 0, 0) + sub depth=1"
+                       : "NONE  -> ev_post(src, code, 0, 0)";
+        case EVK_COPY:
+            return (qos == EVQ_REPLACE_LAST)
+                       ? "COPY (REPLACE_LAST) -> ev_post(src, code, a0, a1) + sub depth=1"
+                       : "COPY  -> ev_post(src, code, a0, a1)";
         case EVK_LEASE:  return "LEASE -> ev_post_lease(src, code, h, len)";
         case EVK_STREAM: return "STREAM -> (PR6: SPSC ring + *_READY)";
         default:         return "?";
@@ -279,15 +285,18 @@ static void evstat_usage_(void)
 {
     printf("użycie:\n");
     printf("  evstat [--reset]\n");
-    printf("  evstat list [--src SRC] [--kind KIND] [--code CODE] [--name SUBSTR] [--doc] [--nohdr]\n");
+    printf("  evstat stat [--per-event] [--nohdr]\n");
+    printf("  evstat list [--src SRC] [--kind KIND] [--code CODE] [--name SUBSTR] [--doc] [--qos] [--nohdr]\n");
     printf("  evstat show <EV_NAME|ID|SRC:CODE>\n");
     printf("  evstat check\n");
     printf("\n");
     printf("przykłady:\n");
     printf("  evstat\n");
+    printf("  evstat stat --per-event\n");
     printf("  evstat --reset\n");
     printf("  evstat list\n");
     printf("  evstat list --doc\n");
+    printf("  evstat list --qos\n");
     printf("  evstat list --src LCD\n");
     printf("  evstat list --kind LEASE\n");
     printf("  evstat list --name lcd\n");
@@ -300,7 +309,7 @@ static void evstat_usage_(void)
 static unsigned ev_schema_total_(void)
 {
     unsigned n = 0;
-#define X(NAME, SRC, CODE, KIND, DOC) n++;
+#define X(NAME, SRC, CODE, KIND, QOS, FLAGS, DOC) n++;
     EV_SCHEMA(X)
 #undef X
     return n;
@@ -312,11 +321,14 @@ typedef struct {
     ev_src_t    src;
     uint16_t    code;
     ev_kind_t   kind;
+    ev_qos_t    qos;
+    uint16_t    flags;
     const char* doc;
 } ev_schema_row_t;
 
 static const ev_schema_row_t s_schema_rows[] = {
-#define X(NAME, SRC, CODE, KIND, DOC) { .name = #NAME, .src = (SRC), .code = (uint16_t)(CODE), .kind = EVK_##KIND, .doc = (DOC) },
+#define X(NAME, SRC, CODE, KIND, QOS, FLAGS, DOC) \
+    { .name = #NAME, .src = (SRC), .code = (uint16_t)(CODE), .kind = EVK_##KIND, .qos = EVQ_##QOS, .flags = (uint16_t)(FLAGS), .doc = (DOC) },
     EV_SCHEMA(X)
 #undef X
 };
@@ -336,6 +348,7 @@ typedef struct {
     const char* name_substr;
 
     bool show_doc;
+    bool show_qos;
     bool nohdr;
 
     unsigned idx;
@@ -347,6 +360,7 @@ static void evstat_list_one_(evstat_list_ctx_t* c,
                              ev_src_t src,
                              uint16_t code,
                              ev_kind_t kind,
+                             ev_qos_t qos,
                              const char* doc)
 {
     const unsigned id = c->idx++;
@@ -355,21 +369,44 @@ static void evstat_list_one_(evstat_list_ctx_t* c,
     if (c->have_code && code != c->f_code) return;
     if (c->name_substr && !str_icontains_(name, c->name_substr)) return;
 
+    const char* qos_s = c->show_qos ? ev_qos_str(qos) : "";
+
     if (c->show_doc) {
-        printf("%-3u %-5s 0x%04X %-6s %-24s %s\n",
-               id,
-               ev_src_str_short(src),
-               (unsigned)code,
-               ev_kind_str_short(kind),
-               name,
-               (doc ? doc : ""));
+        if (c->show_qos) {
+            printf("%-3u %-5s 0x%04X %-6s %-12s %-24s %s\n",
+                   id,
+                   ev_src_str_short(src),
+                   (unsigned)code,
+                   ev_kind_str_short(kind),
+                   qos_s,
+                   name,
+                   (doc ? doc : ""));
+        } else {
+            printf("%-3u %-5s 0x%04X %-6s %-24s %s\n",
+                   id,
+                   ev_src_str_short(src),
+                   (unsigned)code,
+                   ev_kind_str_short(kind),
+                   name,
+                   (doc ? doc : ""));
+        }
     } else {
-        printf("%-3u %-5s 0x%04X %-6s %s\n",
-               id,
-               ev_src_str_short(src),
-               (unsigned)code,
-               ev_kind_str_short(kind),
-               name);
+        if (c->show_qos) {
+            printf("%-3u %-5s 0x%04X %-6s %-12s %s\n",
+                   id,
+                   ev_src_str_short(src),
+                   (unsigned)code,
+                   ev_kind_str_short(kind),
+                   qos_s,
+                   name);
+        } else {
+            printf("%-3u %-5s 0x%04X %-6s %s\n",
+                   id,
+                   ev_src_str_short(src),
+                   (unsigned)code,
+                   ev_kind_str_short(kind),
+                   name);
+        }
     }
 
     c->shown++;
@@ -389,6 +426,10 @@ static int cmd_evstat_list(int argc, char** argv)
         }
         if (!strcmp(a, "--doc")) {
             c.show_doc = true;
+            continue;
+        }
+        if (!strcmp(a, "--qos")) {
+            c.show_qos = true;
             continue;
         }
         if (!strcmp(a, "--nohdr")) {
@@ -429,19 +470,29 @@ static int cmd_evstat_list(int argc, char** argv)
 
     if (!c.nohdr) {
         if (c.show_doc) {
-            printf("id  src   code   kind   name                     doc\n");
-            printf("--  ----- ------ ------ ------------------------ ------------------------------\n");
+            if (c.show_qos) {
+                printf("id  src   code   kind   qos          name                     doc\n");
+                printf("--  ----- ------ ------ ------------ ------------------------ ------------------------------\n");
+            } else {
+                printf("id  src   code   kind   name                     doc\n");
+                printf("--  ----- ------ ------ ------------------------ ------------------------------\n");
+            }
         } else {
-            printf("id  src   code   kind   name\n");
-            printf("--  ----- ------ ------ ------------------------\n");
+            if (c.show_qos) {
+                printf("id  src   code   kind   qos          name\n");
+                printf("--  ----- ------ ------ ------------ ------------------------\n");
+            } else {
+                printf("id  src   code   kind   name\n");
+                printf("--  ----- ------ ------ ------------------------\n");
+            }
         }
     }
 
     c.idx = 0;
     c.shown = 0;
 
-#define X(NAME, SRC, CODE, KIND, DOC) \
-    evstat_list_one_(&c, #NAME, (SRC), (uint16_t)(CODE), EVK_##KIND, (DOC));
+#define X(NAME, SRC, CODE, KIND, QOS, FLAGS, DOC) \
+    evstat_list_one_(&c, #NAME, (SRC), (uint16_t)(CODE), EVK_##KIND, EVQ_##QOS, (DOC));
     EV_SCHEMA(X)
 #undef X
 
@@ -471,6 +522,8 @@ typedef struct {
     ev_src_t src;
     uint16_t code;
     ev_kind_t kind;
+    ev_qos_t qos;
+    uint16_t flags;
     const char* doc;
 
     unsigned idx;
@@ -481,6 +534,8 @@ static void evstat_show_one_(evstat_show_ctx_t* c,
                              ev_src_t src,
                              uint16_t code,
                              ev_kind_t kind,
+                             ev_qos_t qos,
+                             uint16_t flags,
                              const char* doc)
 {
     const unsigned id = c->idx++;
@@ -509,6 +564,8 @@ static void evstat_show_one_(evstat_show_ctx_t* c,
         c->src   = src;
         c->code  = code;
         c->kind  = kind;
+        c->qos   = qos;
+        c->flags = flags;
         c->doc   = doc;
     }
 }
@@ -574,8 +631,8 @@ static int cmd_evstat_show(int argc, char** argv)
         }
     }
 
-#define X(NAME, SRC, CODE, KIND, DOC) \
-    evstat_show_one_(&c, #NAME, (SRC), (uint16_t)(CODE), EVK_##KIND, (DOC));
+#define X(NAME, SRC, CODE, KIND, QOS, FLAGS, DOC) \
+    evstat_show_one_(&c, #NAME, (SRC), (uint16_t)(CODE), EVK_##KIND, EVQ_##QOS, (uint16_t)(FLAGS), (DOC));
     EV_SCHEMA(X)
 #undef X
 
@@ -589,25 +646,14 @@ static int cmd_evstat_show(int argc, char** argv)
     printf("  src : %s (0x%04X)\n", ev_src_str_short(c.src), (unsigned)c.src);
     printf("  code: 0x%04X\n", (unsigned)c.code);
     printf("  kind: %s (%u)\n", ev_kind_str_short(c.kind), (unsigned)c.kind);
+    printf("  qos : %s (%u)\n", ev_qos_str(c.qos), (unsigned)c.qos);
+    printf("  flags: 0x%04X%s\n", (unsigned)c.flags, (c.flags & EVF_CRITICAL) ? " (CRITICAL)" : "");
     if (c.doc && c.doc[0]) {
         printf("  doc : %s\n", c.doc);
     }
-    printf("  api : %s\n", ev_api_hint_(c.kind));
+    printf("  api : %s\n", ev_api_hint_(c.kind, c.qos));
 
     return 0;
-}
-
-/* PR2.8: “krytyczność” — prosta heurystyka po nazwie (bez dodatkowych flag w schemie). */
-static bool ev_is_critical_name_(const char* name)
-{
-    if (!name) return false;
-
-    // Krytyczne: *_ERROR*, *_START* oraz EV_LOG_NEW (log-line jest API systemowe).
-    if (str_icontains_(name, "ERROR")) return true;
-    if (str_icontains_(name, "START")) return true;
-    if (str_ieq_(name, "EV_LOG_NEW")) return true;
-
-    return false;
 }
 
 static int cmd_evstat_check(int argc, char** argv)
@@ -658,7 +704,7 @@ static int cmd_evstat_check(int argc, char** argv)
         }
     }
 
-    // 3) sanity per-entry: name/kind/doc (dla krytycznych)
+    // 3) sanity per-entry: name/kind/qos/flags/doc (dla krytycznych)
     for (unsigned i = 0; i < s_schema_rows_len; ++i) {
         const ev_schema_row_t* e = &s_schema_rows[i];
 
@@ -678,7 +724,32 @@ static int cmd_evstat_check(int argc, char** argv)
             issues++;
         }
 
-        if (ev_is_critical_name_(e->name)) {
+        if ((unsigned)e->qos > (unsigned)EVQ_REPLACE_LAST) {
+            printf("FAIL invalid qos: idx=%u name=%s qos=%u\n",
+                   i,
+                   e->name ? e->name : "?",
+                   (unsigned)e->qos);
+            issues++;
+        }
+
+        if (e->qos == EVQ_REPLACE_LAST && !(e->kind == EVK_NONE || e->kind == EVK_COPY)) {
+            printf("FAIL invalid qos/kind combo: idx=%u name=%s kind=%s qos=%s\n",
+                   i,
+                   e->name ? e->name : "?",
+                   ev_kind_str_short(e->kind),
+                   ev_qos_str(e->qos));
+            issues++;
+        }
+
+        if ((e->flags & (uint16_t)~EVF_ALL) != 0) {
+            printf("FAIL invalid flags: idx=%u name=%s flags=0x%04X\n",
+                   i,
+                   e->name ? e->name : "?",
+                   (unsigned)e->flags);
+            issues++;
+        }
+
+        if (e->flags & EVF_CRITICAL) {
             if (!e->doc || e->doc[0] == '\0') {
                 printf("FAIL missing doc (CRITICAL): name=%s src=%s code=0x%04X kind=%s\n",
                        e->name ? e->name : "?",
@@ -697,6 +768,82 @@ static int cmd_evstat_check(int argc, char** argv)
 
     printf("evstat check: FAIL (issues=%d, entries=%u)\n", issues, (unsigned)s_schema_rows_len);
     return 1;
+}
+
+static int cmd_evstat_stat(int argc, char** argv)
+{
+    // evstat stat [--per-event] [--nohdr]
+    bool per_event = false;
+    bool nohdr     = false;
+
+    for (int i = 2; i < argc; i++) {
+        if (strcmp(argv[i], "--per-event") == 0 || strcmp(argv[i], "--per") == 0) {
+            per_event = true;
+            continue;
+        }
+        if (strcmp(argv[i], "--nohdr") == 0) {
+            nohdr = true;
+            continue;
+        }
+
+        printf("evstat stat: unknown option: %s\n", argv[i]);
+        evstat_usage_();
+        return 1;
+    }
+
+    // Global stats (always).
+    ev_stats_t s;
+    ev_get_stats(&s);
+
+    const unsigned total = ev_schema_total_();
+
+    printf("evstat: subs=%u (max=%u) depth_max=%u total_ev=%u\n",
+           (unsigned)s.subs_active,
+           (unsigned)s.subs_max,
+           (unsigned)s.q_depth_max,
+           total);
+    printf("  posts_ok=%u posts_drop=%u enq_fail=%u\n",
+           (unsigned)s.posts_ok,
+           (unsigned)s.posts_drop,
+           (unsigned)s.enq_fail);
+
+    if (!per_event) {
+        return 0;
+    }
+
+    const size_t n = s_schema_rows_len;
+    ev_event_stats_t* st = (ev_event_stats_t*)calloc(n, sizeof(*st));
+    if (!st) {
+        printf("evstat stat: OOM (calloc)\n");
+        return 1;
+    }
+
+    const size_t got = ev_get_event_stats(st, n);
+    const size_t rows = (got < n) ? got : n;
+
+    if (!nohdr) {
+        printf("id  src   code   kind   qos          posts_ok posts_drop enq_fail delivered name\n");
+    }
+
+    for (size_t i = 0; i < rows; i++) {
+        const ev_schema_row_t* e = &s_schema_rows[i];
+        const ev_event_stats_t* r = &st[i];
+
+        printf("%-3u %-5s 0x%04X %-6s %-12s %-8u %-10u %-8u %-9u %s\n",
+               (unsigned)i,
+               ev_src_str_short(e->src),
+               (unsigned)e->code,
+               ev_kind_str_short(e->kind),
+               ev_qos_str(e->qos),
+               (unsigned)r->posts_ok,
+               (unsigned)r->posts_drop,
+               (unsigned)r->enq_fail,
+               (unsigned)r->delivered,
+               e->name ? e->name : "(null)");
+    }
+
+    free(st);
+    return 0;
 }
 
 static int cmd_evstat(int argc, char **argv)
@@ -719,8 +866,11 @@ static int cmd_evstat(int argc, char **argv)
         return 0;
     }
 
-    // Subkomendy: list / show / check
+    // Subkomendy: stat / list / show / check
     if (argc >= 2) {
+        if (!strcmp(argv[1], "stat")) {
+            return cmd_evstat_stat(argc - 1, argv + 1);
+        }
         if (!strcmp(argv[1], "list")) {
             return cmd_evstat_list(argc - 1, argv + 1);
         }
@@ -857,7 +1007,7 @@ esp_err_t infra_log_cli_register(void)
         .command = "evstat",
         .help    =
             "Event-bus stats + schema.\n"
-            "Usage: evstat [--reset] | evstat list [...] | evstat show <EV_NAME|ID|SRC:CODE> | evstat check",
+            "Usage: evstat [--reset] | evstat stat [--per-event] | evstat list [...] | evstat show <EV_NAME|ID|SRC:CODE> | evstat check",
         .hint    = NULL,
         .func    = &cmd_evstat,
         .argtable= NULL

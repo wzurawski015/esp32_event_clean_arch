@@ -44,10 +44,11 @@ typedef enum {
     EVQ_REPLACE_LAST,
 } ev_qos_t;
 
+/* Flagi metadanych zdarzeń */
 enum {
     EVF_NONE     = 0u,
     EVF_CRITICAL = (1u << 0),
-    EVF_ALL      = EVF_CRITICAL, /* FIX: Dodane */
+    EVF_ALL      = EVF_CRITICAL, /* FIX: Dodana brakująca definicja maski wszystkich flag */
 };
 
 #include "core_ev_schema.h"
@@ -76,6 +77,7 @@ const char* ev_qos_str(ev_qos_t qos);
 size_t ev_meta_count(void);
 const ev_meta_t* ev_meta_by_index(size_t idx);
 
+/* Statystyki per-event */
 typedef struct {
     uint32_t posts_ok;
     uint32_t posts_drop;
@@ -102,8 +104,10 @@ bool ev_post(ev_src_t src, uint16_t code, uint32_t a0, uint32_t a1);
 bool ev_post_lease(ev_src_t src, uint16_t code, lp_handle_t h, uint16_t len);
 bool ev_post_from_isr(ev_src_t src, uint16_t code, uint32_t a0, uint32_t a1);
 
+/* Statystyki globalne busa */
 typedef struct {
-    uint16_t subs;
+    uint16_t subs_active; /* FIX: Zmiana nazwy z 'subs' na 'subs_active' dla czytelności w CLI */
+    uint16_t subs_max;    /* FIX: Nowe pole */
     uint32_t posts_ok;
     uint32_t posts_drop;
     uint32_t enq_fail;

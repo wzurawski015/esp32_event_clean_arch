@@ -93,7 +93,7 @@ enum { EV_META_LEN = (int)(sizeof(s_ev_meta) / sizeof(s_ev_meta[0])) };
 
 static const size_t s_ev_meta_len = (size_t)EV_META_LEN;
 
-/* FIX: Ujednolicone nazwy zmiennych (s_ev_* zamiast s_evt_*) */
+/* FIX: Poprawione nazwy tablic statystyk (usunięto 't' z s_evt_) */
 static uint32_t s_ev_posts_ok[EV_META_LEN];
 static uint32_t s_ev_posts_drop[EV_META_LEN];
 static uint32_t s_ev_enq_fail[EV_META_LEN];
@@ -237,7 +237,7 @@ static void ev_schema_selftest_or_abort_(void)
             EV_DIAG_PRINTF("EV SCHEMA SELFTEST FAIL: qos=REPLACE_LAST invalid for kind idx=%u\n", (unsigned)i);
             issues++;
         }
-        /* FIX: Użycie stałej EVF_ALL, która jest teraz zdefiniowana w nagłówku */
+        
         if ((m->flags & (uint16_t)~EVF_ALL) != 0) {
              EV_DIAG_PRINTF("EV SCHEMA SELFTEST FAIL: unknown flags idx=%u flags=0x%04X\n", (unsigned)i, (unsigned)m->flags);
              issues++;
@@ -330,7 +330,7 @@ void ev_init(void)
     s_posts_ok    = 0;
     s_posts_drop  = 0;
     s_enq_fail    = 0;
-    /* FIX: Zerowanie poprawnych nazw zmiennych */
+    
     memset(s_ev_posts_ok,   0, sizeof(s_ev_posts_ok));
     memset(s_ev_posts_drop, 0, sizeof(s_ev_posts_drop));
     memset(s_ev_enq_fail,   0, sizeof(s_ev_enq_fail));
@@ -520,7 +520,10 @@ void ev_get_stats(ev_stats_t* out)
     EV_CS_ENTER();
     uint16_t subs = 0;
     for (uint16_t i = 0; i < s_subs_cnt; ++i) if (s_subs[i].q) subs++;
-    out->subs        = subs;
+    
+    /* FIX: Aktualizacja pól struktury ev_stats_t */
+    out->subs_active = subs;
+    out->subs_max    = EV_MAX_SUBS;
     out->q_depth_max = s_q_depth_max;
     out->posts_ok    = s_posts_ok;
     out->posts_drop  = s_posts_drop;
@@ -534,7 +537,7 @@ void ev_reset_stats(void)
     s_posts_ok   = 0;
     s_posts_drop = 0;
     s_enq_fail   = 0;
-    /* FIX: Poprawne nazwy zmiennych */
+    
     memset(s_ev_posts_ok,   0, sizeof(s_ev_posts_ok));
     memset(s_ev_posts_drop, 0, sizeof(s_ev_posts_drop));
     memset(s_ev_enq_fail,   0, sizeof(s_ev_enq_fail));

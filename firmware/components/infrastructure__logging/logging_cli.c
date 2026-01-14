@@ -1,20 +1,3 @@
-/**
- * @file logging_cli.c
- * @brief CLI: logrb (ring-buffer) + loglvl (poziomy logów) + opcjonalny REPL + evstat.
- *
- * Komendy:
- *  - logrb   : diagnostyka ring‑buffer logów (stat/clear/dump/tail)
- *  - loglvl  : zmiana poziomu logowania w locie (per TAG lub globalnie '*')
- *  - evstat  : statystyki event‑busa + introspekcja schemy:
- *      - evstat
- *      - evstat --reset
- *      - evstat list [--src SRC] [--kind KIND] [--code CODE] [--name SUBSTR] [--doc] [--nohdr]
- *      - evstat show <EV_NAME|ID|SRC:CODE>
- *      - evstat check
- *
- * REPL uruchamiany jest „miękko” (idempotentnie), współdzieli UART jeśli zajęty.
- */
-
 #include "sdkconfig.h"
 #include "logging_cli.h"
 
@@ -157,12 +140,6 @@ static int cmd_loglvl(int argc, char** argv)
 
 /* ========================= evstat =========================
  * Statystyki busa + introspekcja schemy (PR2.6/PR2.7/PR2.8).
- *
- *  evstat
- *  evstat --reset
- *  evstat list [--src SRC] [--kind KIND] [--code CODE] [--name SUBSTR] [--doc] [--nohdr]
- *  evstat show <EV_NAME|ID|SRC:CODE>
- *  evstat check
  */
 
 static const char* ev_kind_str_short(ev_kind_t k)
@@ -741,6 +718,7 @@ static int cmd_evstat_check(int argc, char** argv)
             issues++;
         }
 
+        /* FIX: Użycie stałej EVF_ALL, która jest teraz zdefiniowana w nagłówku */
         if ((e->flags & (uint16_t)~EVF_ALL) != 0) {
             printf("FAIL invalid flags: idx=%u name=%s flags=0x%04X\n",
                    i,
@@ -797,9 +775,10 @@ static int cmd_evstat_stat(int argc, char** argv)
 
     const unsigned total = ev_schema_total_();
 
+    /* FIX: Użycie poprawnych pól struktury (subs_active, subs_max) */
     printf("evstat: subs=%u (max=%u) depth_max=%u total_ev=%u\n",
-           (unsigned)s.subs,
-           (unsigned)EV_MAX_SUBS,
+           (unsigned)s.subs_active,
+           (unsigned)s.subs_max,
            (unsigned)s.q_depth_max,
            total);
     printf("  posts_ok=%u posts_drop=%u enq_fail=%u\n",
@@ -887,7 +866,7 @@ static int cmd_evstat(int argc, char **argv)
         ev_stats_t s;
         ev_get_stats(&s);
         printf("ev: subs=%u q_depth_max=%u posts_ok=%u posts_drop=%u enq_fail=%u\n",
-               (unsigned)s.subs, (unsigned)s.q_depth_max,
+               (unsigned)s.subs_active, (unsigned)s.q_depth_max,
                (unsigned)s.posts_ok, (unsigned)s.posts_drop, (unsigned)s.enq_fail);
         return 0;
     }
@@ -897,8 +876,6 @@ static int cmd_evstat(int argc, char **argv)
     evstat_usage_();
     return 2;
 }
-
-
 
 /* ===================== komendy: lpstat (LeasePool) ===================== */
 
@@ -1140,3 +1117,4 @@ esp_err_t infra_log_cli_register(void)   { return ESP_OK; }
 esp_err_t infra_log_cli_start_repl(void) { return ESP_OK; }
 
 #endif  // CONFIG_INFRA_LOG_CLI
+

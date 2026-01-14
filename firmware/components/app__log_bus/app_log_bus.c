@@ -29,7 +29,7 @@ static void logbus_flush_line_locked(void)
 
     // Alokuj lease – jeśli linia > cap, wysyłamy ogon (ostatnie cap bajtów)
     lp_handle_t h = lp_alloc_try((uint32_t)len);
-    if (h.idx != LP_INVALID_IDX) {
+    if (lp_handle_is_valid(h)) {
         lp_view_t v;
         if (lp_acquire(h, &v)) {
             size_t copy_len = len;

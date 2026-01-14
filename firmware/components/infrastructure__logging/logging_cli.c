@@ -748,6 +748,79 @@ static int cmd_evstat(int argc, char **argv)
     return 2;
 }
 
+
+
+/* ===================== komendy: lpstat (LeasePool) ===================== */
+
+static void lpstat_usage_(void)
+{
+    printf("użycie:\n");
+    printf("  lpstat                 pokaż statystyki LeasePool\n");
+    printf("  lpstat --reset          wyzeruj liczniki (bez resetu slotów)\n");
+    printf("  lpstat check            sanity-check (free-list/magic/canary)\n");
+    printf("  lpstat dump             zrzut slotów (debug)\n");
+}
+
+static int cmd_lpstat(int argc, char **argv)
+{
+    if (argc <= 1) {
+        lp_stats_t st = {0};
+        lp_get_stats(&st);
+
+        printf("lp: total=%u free=%u used=%u peak=%u alloc_ok=%u alloc_fail=%u guard_fail=%u\n",
+               (unsigned)st.slots_total, (unsigned)st.slots_free,
+               (unsigned)st.slots_used, (unsigned)st.slots_peak_used,
+               (unsigned)st.alloc_ok, (unsigned)st.drops_alloc_fail,
+               (unsigned)st.guard_failures);
+        return 0;
+    }
+
+    if (!strcmp(argv[1], "-h") || !strcmp(argv[1], "--help")) {
+        lpstat_usage_();
+        return 0;
+    }
+
+    if (!strcmp(argv[1], "--reset")) {
+        if (argc != 2) {
+            printf("ERR: lpstat --reset nie przyjmuje dodatkowych argumentów\n");
+            lpstat_usage_();
+            return 2;
+        }
+        lp_reset_stats();
+        printf("lp: stats reset OK\n");
+        return 0;
+    }
+
+    if (!strcmp(argv[1], "check")) {
+        if (argc != 2) {
+            printf("ERR: lpstat check nie przyjmuje dodatkowych argumentów\n");
+            lpstat_usage_();
+            return 2;
+        }
+        const int issues = lp_check(true);
+        if (issues == 0) {
+            printf("lpstat check: OK\n");
+            return 0;
+        }
+        printf("lpstat check: FAIL (issues=%d)\n", issues);
+        return 1;
+    }
+
+    if (!strcmp(argv[1], "dump")) {
+        if (argc != 2) {
+            printf("ERR: lpstat dump nie przyjmuje dodatkowych argumentów\n");
+            lpstat_usage_();
+            return 2;
+        }
+        lp_dump();
+        return 0;
+    }
+
+    printf("ERR: nieznany tryb/opcja: %s\n", argv[1]);
+    lpstat_usage_();
+    return 2;
+}
+
 /* ==================== rejestracja CLI (idempotentna) ==================== */
 
 static bool s_cmds_registered = false;
@@ -791,8 +864,17 @@ esp_err_t infra_log_cli_register(void)
     };
     ESP_ERROR_CHECK_WITHOUT_ABORT(esp_console_cmd_register(&cmd_evstat_desc));
 
+    const esp_console_cmd_t cmd_lpstat_desc = {
+        .command = "lpstat",
+        .help    = "lpstat [--reset|check|dump]  (LeasePool: statystyki i sanity-check)",
+        .hint    = NULL,
+        .func    = &cmd_lpstat,
+        .argtable= NULL
+    };
+    ESP_ERROR_CHECK_WITHOUT_ABORT(esp_console_cmd_register(&cmd_lpstat_desc));
+
     s_cmds_registered = true;
-    ESP_LOGI(TAG, "registered 'logrb', 'loglvl' and 'evstat' commands");
+    ESP_LOGI(TAG, "registered 'logrb', 'loglvl', 'evstat' and 'lpstat' commands");
     return ESP_OK;
 }
 

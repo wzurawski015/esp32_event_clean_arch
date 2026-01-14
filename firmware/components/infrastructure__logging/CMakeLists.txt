@@ -18,4 +18,5 @@ idf_component_register(
         vfs             # esp_vfs_dev.h (REPL przez UART0)
         esp_driver_uart # nowy sterownik UART (nagłówek: driver/uart.h)
         core__ev        # event bus: evstat + API
+        core__leasepool  # lpstat
 )

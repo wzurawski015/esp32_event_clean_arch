@@ -798,8 +798,8 @@ static int cmd_evstat_stat(int argc, char** argv)
     const unsigned total = ev_schema_total_();
 
     printf("evstat: subs=%u (max=%u) depth_max=%u total_ev=%u\n",
-           (unsigned)s.subs_active,
-           (unsigned)s.subs_max,
+           (unsigned)s.subs,
+           (unsigned)EV_MAX_SUBS,
            (unsigned)s.q_depth_max,
            total);
     printf("  posts_ok=%u posts_drop=%u enq_fail=%u\n",

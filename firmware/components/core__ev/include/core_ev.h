@@ -30,6 +30,7 @@ enum {
     EV_SRC_LCD   = 0x04,
     EV_SRC_DS18  = 0x05,
     EV_SRC_LOG   = 0x06,
+    EV_SRC_UART  = 0x07,
 };
 
 typedef enum {
@@ -48,7 +49,7 @@ typedef enum {
 enum {
     EVF_NONE     = 0u,
     EVF_CRITICAL = (1u << 0),
-    EVF_ALL      = EVF_CRITICAL, /* FIX: Dodana brakująca definicja maski wszystkich flag */
+    EVF_ALL      = EVF_CRITICAL,
 };
 
 #include "core_ev_schema.h"
@@ -106,11 +107,7 @@ bool ev_post_from_isr(ev_src_t src, uint16_t code, uint32_t a0, uint32_t a1);
 
 /* =========================
  * PR7: EventBus jako port (vtbl) — dependency injection
- *
- * Serwisy/aktory NIE muszą wołać globalnych ev_post*().
- * Zamiast tego dostają wskaźnik do ev_bus_t (implementacja + self),
- * co umożliwia w testach podstawienie fake-busa.
- */
+ * ========================= */
 
 typedef struct ev_bus_vtbl {
     bool (*post)(void* self, ev_src_t src, uint16_t code, uint32_t a0, uint32_t a1);
@@ -125,12 +122,6 @@ typedef struct ev_bus {
     const ev_bus_vtbl_t* vtbl;
 } ev_bus_t;
 
-/**
- * @brief Domyślna instancja busa (singleton core__ev).
- *
- * Uwaga: sam obiekt busa można pobrać zawsze, ale przed użyciem należy wywołać
- * ev_init() (inicjalizacja rdzenia event-busa).
- */
 const ev_bus_t* ev_bus_default(void);
 
 static inline bool ev_bus_post(const ev_bus_t* bus, ev_src_t src, uint16_t code, uint32_t a0, uint32_t a1)
@@ -160,8 +151,8 @@ static inline bool ev_bus_unsubscribe(const ev_bus_t* bus, ev_queue_t q)
 
 /* Statystyki globalne busa */
 typedef struct {
-    uint16_t subs_active; /* FIX: Zmiana nazwy z 'subs' na 'subs_active' dla czytelności w CLI */
-    uint16_t subs_max;    /* FIX: Nowe pole */
+    uint16_t subs_active;
+    uint16_t subs_max;
     uint32_t posts_ok;
     uint32_t posts_drop;
     uint32_t enq_fail;
@@ -174,4 +165,3 @@ void ev_reset_stats(void);
 #ifdef __cplusplus
 }
 #endif
-

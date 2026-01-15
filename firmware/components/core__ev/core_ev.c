@@ -23,18 +23,15 @@
 #include "freertos/portmacro.h"
 #include "freertos/task.h"
 
-/* Jedno źródło prawdy dla EV_MAX_SUBS jest w core_ev.h — tutaj bez fallbacków. */
 #if (EV_MAX_SUBS < 1)
 #  error "EV_MAX_SUBS must be >= 1"
 #endif
 
-/** Wewnętrzny opis subskrybenta. */
 typedef struct {
     ev_queue_t q;
     uint16_t   depth;
 } ev_sub_t;
 
-/* ====== Stan globalny busa ====== */
 static ev_sub_t  s_subs[EV_MAX_SUBS];
 static uint16_t  s_subs_cnt;
 static uint16_t  s_q_depth_max;
@@ -43,7 +40,6 @@ static uint32_t  s_posts_ok;
 static uint32_t  s_posts_drop;
 static uint32_t  s_enq_fail;
 
-/* Sekcje krytyczne: w portach IDF z portMUX używamy *_ISR w ISR. */
 #if defined(portMUX_INITIALIZER_UNLOCKED)
 static portMUX_TYPE s_ev_mux = portMUX_INITIALIZER_UNLOCKED;
 #  define EV_CS_ENTER()      portENTER_CRITICAL(&s_ev_mux)
@@ -53,7 +49,6 @@ static portMUX_TYPE s_ev_mux = portMUX_INITIALIZER_UNLOCKED;
 #else
 #  define EV_CS_ENTER()      taskENTER_CRITICAL()
 #  define EV_CS_EXIT()       taskEXIT_CRITICAL()
-/* Na platformach bez portMUX używamy tych samych makr także w ISR. */
 #  define EV_CS_ENTER_ISR()  taskENTER_CRITICAL()
 #  define EV_CS_EXIT_ISR()   taskEXIT_CRITICAL()
 #endif
@@ -75,17 +70,33 @@ static const char* ev_kind_str_(ev_kind_t k)
         default:         return "?";
     }
 }
+static const char* ev_qos_str_(ev_qos_t qos)
+{
+    switch (qos) {
+        case EVQ_DROP_NEW:     return "DROP_NEW";
+        case EVQ_REPLACE_LAST: return "REPLACE_LAST";
+        default:               return "UNKNOWN";
+    }
+}
 #endif
 
-/* ===================== PR2: schema/meta lookup ===================== */
+/* ===================== SCHEMA ===================== */
 
 static const ev_meta_t s_ev_meta[] = {
-#define X(NAME, SRC, CODE, KIND, DOC) { .src = (SRC), .code = (CODE), .kind = EVK_##KIND, .name = #NAME, .doc = (DOC) },
+#define X(NAME, SRC, CODE, KIND, QOS, FLAGS, DOC) \
+    { .src = (SRC), .code = (CODE), .kind = EVK_##KIND, .qos = EVQ_##QOS, .flags = (uint16_t)(FLAGS), .name = #NAME, .doc = (DOC) },
     EV_SCHEMA(X)
 #undef X
 };
 
-static const size_t s_ev_meta_len = sizeof(s_ev_meta) / sizeof(s_ev_meta[0]);
+enum { EV_META_LEN = (int)(sizeof(s_ev_meta) / sizeof(s_ev_meta[0])) };
+
+static const size_t s_ev_meta_len = (size_t)EV_META_LEN;
+
+static uint32_t s_ev_posts_ok[EV_META_LEN];
+static uint32_t s_ev_posts_drop[EV_META_LEN];
+static uint32_t s_ev_enq_fail[EV_META_LEN];
+static uint32_t s_ev_delivered[EV_META_LEN];
 
 const ev_meta_t* ev_meta_find(ev_src_t src, uint16_t code)
 {
@@ -103,7 +114,7 @@ const char* ev_code_name(ev_src_t src, uint16_t code)
     return m ? m->name : "EV_UNKNOWN";
 }
 
-/* ===================== PR2.8: schema guards (debug/fail-fast) ===================== */
+/* ===================== GUARDS ===================== */
 
 #if defined(CONFIG_CORE_EV_SCHEMA_GUARD) && CONFIG_CORE_EV_SCHEMA_GUARD
 
@@ -114,13 +125,16 @@ static void ev_schema_abort_(const char* api,
                              const char* why)
 {
     if (meta) {
-        EV_DIAG_PRINTF("EV SCHEMA VIOLATION: %s: %s (src=0x%04X code=0x%04X name=%s kind=%s)\n",
+        EV_DIAG_PRINTF(
+            "EV SCHEMA VIOLATION: %s: %s (src=0x%04X code=0x%04X name=%s kind=%s qos=%s flags=0x%04X)\n",
                api,
                why,
                (unsigned)src,
                (unsigned)code,
                meta->name ? meta->name : "?",
-               ev_kind_str_(meta->kind));
+               ev_kind_str_(meta->kind),
+               ev_qos_str_(meta->qos),
+               (unsigned)meta->flags);
     } else {
         EV_DIAG_PRINTF("EV SCHEMA VIOLATION: %s: %s (src=0x%04X code=0x%04X name=EV_UNKNOWN)\n",
                api,
@@ -140,66 +154,35 @@ static const ev_meta_t* ev_schema_require_known_(const char* api, ev_src_t src, 
     return meta;
 }
 
-static void ev_schema_require_kind_1_(const char* api,
-                                      ev_src_t src,
-                                      uint16_t code,
-                                      const ev_meta_t* meta,
-                                      ev_kind_t k0)
+static void ev_schema_require_kind_1_(const char* api, ev_src_t src, uint16_t code, const ev_meta_t* meta, ev_kind_t k0)
 {
-    if (!meta) {
-        ev_schema_abort_(api, src, code, NULL, "internal: meta==NULL");
-    }
-    if (meta->kind != k0) {
-        ev_schema_abort_(api, src, code, meta, "wrong API for event kind");
+    if (!meta) ev_schema_abort_(api, src, code, NULL, "internal: meta==NULL");
+    if (meta->kind != k0) ev_schema_abort_(api, src, code, meta, "wrong API for event kind");
+}
+
+static void ev_schema_require_kind_3_(const char* api, ev_src_t src, uint16_t code, const ev_meta_t* meta, ev_kind_t k0, ev_kind_t k1, ev_kind_t k2)
+{
+    if (!meta) ev_schema_abort_(api, src, code, NULL, "internal: meta==NULL");
+    if (!(meta->kind == k0 || meta->kind == k1 || meta->kind == k2)) ev_schema_abort_(api, src, code, meta, "wrong API for event kind");
+}
+
+static void ev_schema_require_none_payload_(const char* api, ev_src_t src, uint16_t code, const ev_meta_t* meta, uint32_t a0, uint32_t a1)
+{
+    if (!meta) ev_schema_abort_(api, src, code, NULL, "internal: meta==NULL");
+    if ((meta->kind == EVK_NONE || meta->kind == EVK_STREAM) && (a0 != 0u || a1 != 0u)) {
+        ev_schema_abort_(api, src, code, meta, "EVK_NONE/STREAM requires a0=a1=0");
     }
 }
 
-static void ev_schema_require_kind_2_(const char* api,
-                                      ev_src_t src,
-                                      uint16_t code,
-                                      const ev_meta_t* meta,
-                                      ev_kind_t k0,
-                                      ev_kind_t k1)
-{
-    if (!meta) {
-        ev_schema_abort_(api, src, code, NULL, "internal: meta==NULL");
-    }
-    if (!(meta->kind == k0 || meta->kind == k1)) {
-        ev_schema_abort_(api, src, code, meta, "wrong API for event kind");
-    }
-}
+#endif // GUARD
 
-static void ev_schema_require_none_payload_(const char* api,
-                                            ev_src_t src,
-                                            uint16_t code,
-                                            const ev_meta_t* meta,
-                                            uint32_t a0,
-                                            uint32_t a1)
-{
-    if (!meta) {
-        ev_schema_abort_(api, src, code, NULL, "internal: meta==NULL");
-    }
-    if (meta->kind == EVK_NONE && (a0 != 0u || a1 != 0u)) {
-        ev_schema_abort_(api, src, code, meta, "EVK_NONE requires a0=a1=0");
-    }
-}
-
-#endif // CONFIG_CORE_EV_SCHEMA_GUARD
-
-/* ===================== PR2.9: schema self-test (boot-time) ===================== */
+/* ===================== SELFTEST ===================== */
 
 #if defined(CONFIG_CORE_EV_SCHEMA_SELFTEST_ON_BOOT) && CONFIG_CORE_EV_SCHEMA_SELFTEST_ON_BOOT
 
-static bool ev_schema_is_critical_name_(const char* name)
+static bool ev_schema_is_critical_(const ev_meta_t* m)
 {
-    if (!name) return false;
-
-    // Krytyczne: *_ERROR*, *_START* oraz EV_LOG_NEW (log-line jest API systemowe).
-    if (strstr(name, "ERROR")) return true;
-    if (strstr(name, "START")) return true;
-    if (strcmp(name, "EV_LOG_NEW") == 0) return true;
-
-    return false;
+    return (m && ((m->flags & EVF_CRITICAL) != 0));
 }
 
 static void ev_schema_selftest_or_abort_(void)
@@ -214,10 +197,8 @@ static void ev_schema_selftest_or_abort_(void)
     for (size_t i = 0; i < s_ev_meta_len; ++i) {
         for (size_t j = i + 1; j < s_ev_meta_len; ++j) {
             if (s_ev_meta[i].src == s_ev_meta[j].src && s_ev_meta[i].code == s_ev_meta[j].code) {
-                EV_DIAG_PRINTF("EV SCHEMA SELFTEST FAIL: dup src+code: src=0x%04X code=0x%04X : %s <-> %s\n",
-                               (unsigned)s_ev_meta[i].src, (unsigned)s_ev_meta[i].code,
-                               s_ev_meta[i].name ? s_ev_meta[i].name : "?",
-                               s_ev_meta[j].name ? s_ev_meta[j].name : "?");
+                EV_DIAG_PRINTF("EV SCHEMA SELFTEST FAIL: dup src+code: src=0x%04X code=0x%04X\n",
+                               (unsigned)s_ev_meta[i].src, (unsigned)s_ev_meta[i].code);
                 issues++;
             }
         }
@@ -229,42 +210,42 @@ static void ev_schema_selftest_or_abort_(void)
         for (size_t j = i + 1; j < s_ev_meta_len; ++j) {
             if (!s_ev_meta[j].name || s_ev_meta[j].name[0] == '\0') continue;
             if (strcmp(s_ev_meta[i].name, s_ev_meta[j].name) == 0) {
-                EV_DIAG_PRINTF("EV SCHEMA SELFTEST FAIL: dup name: %s (src=0x%04X code=0x%04X) and (src=0x%04X code=0x%04X)\n",
-                               s_ev_meta[i].name,
-                               (unsigned)s_ev_meta[i].src, (unsigned)s_ev_meta[i].code,
-                               (unsigned)s_ev_meta[j].src, (unsigned)s_ev_meta[j].code);
+                EV_DIAG_PRINTF("EV SCHEMA SELFTEST FAIL: dup name: %s\n", s_ev_meta[i].name);
                 issues++;
             }
         }
     }
 
-    // 3) sanity per-entry: name/kind/doc (dla krytycznych)
+    // 3) sanity
     for (size_t i = 0; i < s_ev_meta_len; ++i) {
         const ev_meta_t* m = &s_ev_meta[i];
 
         if (!m->name || m->name[0] == '\0') {
-            EV_DIAG_PRINTF("EV SCHEMA SELFTEST FAIL: empty name: idx=%u src=0x%04X code=0x%04X\n",
-                           (unsigned)i,
-                           (unsigned)m->src,
-                           (unsigned)m->code);
+            EV_DIAG_PRINTF("EV SCHEMA SELFTEST FAIL: empty name idx=%u\n", (unsigned)i);
             issues++;
         }
-
         if ((unsigned)m->kind > (unsigned)EVK_STREAM) {
-            EV_DIAG_PRINTF("EV SCHEMA SELFTEST FAIL: invalid kind: idx=%u name=%s kind=%u\n",
-                           (unsigned)i,
-                           m->name ? m->name : "?",
-                           (unsigned)m->kind);
+            EV_DIAG_PRINTF("EV SCHEMA SELFTEST FAIL: invalid kind idx=%u\n", (unsigned)i);
             issues++;
         }
+        if ((unsigned)m->qos > (unsigned)EVQ_REPLACE_LAST) {
+            EV_DIAG_PRINTF("EV SCHEMA SELFTEST FAIL: invalid qos idx=%u\n", (unsigned)i);
+            issues++;
+        }
+        /* FIX: Dodano EVK_STREAM do dozwolonych typów dla REPLACE_LAST */
+        if (m->qos == EVQ_REPLACE_LAST && (m->kind != EVK_NONE && m->kind != EVK_COPY && m->kind != EVK_STREAM)) {
+            EV_DIAG_PRINTF("EV SCHEMA SELFTEST FAIL: qos=REPLACE_LAST invalid for kind idx=%u\n", (unsigned)i);
+            issues++;
+        }
+        
+        if ((m->flags & (uint16_t)~EVF_ALL) != 0) {
+             EV_DIAG_PRINTF("EV SCHEMA SELFTEST FAIL: unknown flags idx=%u flags=0x%04X\n", (unsigned)i, (unsigned)m->flags);
+             issues++;
+        }
 
-        if (ev_schema_is_critical_name_(m->name)) {
+        if (ev_schema_is_critical_(m)) {
             if (!m->doc || m->doc[0] == '\0') {
-                EV_DIAG_PRINTF("EV SCHEMA SELFTEST FAIL: missing doc (CRITICAL): name=%s src=0x%04X code=0x%04X kind=%s\n",
-                               m->name ? m->name : "?",
-                               (unsigned)m->src,
-                               (unsigned)m->code,
-                               ev_kind_str_(m->kind));
+                EV_DIAG_PRINTF("EV SCHEMA SELFTEST FAIL: missing doc (CRITICAL) idx=%u\n", (unsigned)i);
                 issues++;
             }
         }
@@ -274,20 +255,23 @@ static void ev_schema_selftest_or_abort_(void)
         EV_DIAG_PRINTF("EV schema selftest: OK (entries=%u)\n", (unsigned)s_ev_meta_len);
         return;
     }
-
-    EV_DIAG_PRINTF("EV schema selftest: FAIL (issues=%d, entries=%u) -> abort()\n",
-                   issues, (unsigned)s_ev_meta_len);
+    EV_DIAG_PRINTF("EV schema selftest: FAIL (issues=%d)\n", issues);
     abort();
 }
 
-#endif // CONFIG_CORE_EV_SCHEMA_SELFTEST_ON_BOOT
+#endif // SELFTEST
 
-/* Wysyła ramkę do wszystkich subów; zwraca liczbę rzeczywistych dostarczeń. */
-static uint16_t ev_broadcast(const ev_msg_t* m)
+/* ====== BUS LOGIC ====== */
+
+typedef struct {
+    uint16_t delivered;
+    uint16_t enq_fail;
+} ev_fanout_t;
+
+static ev_fanout_t ev_broadcast(const ev_msg_t* m, ev_qos_t qos)
 {
-    uint16_t delivered = 0;
+    ev_fanout_t r = {0};
 
-    /* Snapshot listy subskrybentów (krótka sekcja krytyczna). */
     EV_CS_ENTER();
     uint16_t n = s_subs_cnt;
     ev_sub_t local[EV_MAX_SUBS];
@@ -297,62 +281,45 @@ static uint16_t ev_broadcast(const ev_msg_t* m)
 
     for (uint16_t i = 0; i < n; ++i) {
         if (local[i].q == NULL) continue;
-        BaseType_t ok = xQueueSend(local[i].q, m, 0); // NIE blokujemy producenta
-        if (ok == pdTRUE) {
-            delivered++;
+
+        BaseType_t ok = pdFALSE;
+        if (qos == EVQ_REPLACE_LAST && local[i].depth == 1) {
+            ok = xQueueOverwrite(local[i].q, m);
         } else {
-            /* Kolejka subskrybenta pełna. */
-            EV_CS_ENTER();
-            s_enq_fail++;
-            EV_CS_EXIT();
+            ok = xQueueSend(local[i].q, m, 0);
         }
+
+        if (ok == pdTRUE) r.delivered++;
+        else              r.enq_fail++;
     }
-    return delivered;
+    return r;
 }
 
-// PR1: LEASE musi mieć refcount “zarezerwowany” zanim handle trafi do kolejki.
-// xQueueSend może natychmiast przełączyć na task o wyższym priorytecie.
-static uint16_t ev_broadcast_lease(const ev_msg_t* m, lp_handle_t h)
+static ev_fanout_t ev_broadcast_lease(const ev_msg_t* m, lp_handle_t h)
 {
-    uint16_t delivered = 0;
-
-    // Snapshot subskrybentów (taki sam pattern jak w ev_broadcast)
+    ev_fanout_t r = {0};
     ev_sub_t local[EV_MAX_SUBS] = { 0 };
     uint16_t n = 0;
 
     EV_CS_ENTER();
     n = s_subs_cnt;
-    for (uint16_t i = 0; i < n && i < EV_MAX_SUBS; ++i) {
-        local[i] = s_subs[i];
-    }
+    for (uint16_t i = 0; i < n && i < EV_MAX_SUBS; ++i) local[i] = s_subs[i];
     EV_CS_EXIT();
 
     for (uint16_t i = 0; i < n && i < EV_MAX_SUBS; ++i) {
-        if (local[i].q == NULL) {
-            continue;
-        }
-
-        // 1) rezerwujemy ref dla tego konsumenta
+        if (local[i].q == NULL) continue;
         lp_addref_n(h, 1);
-
-        // 2) publikujemy handle
         if (xQueueSend(local[i].q, m, 0) == pdTRUE) {
-            delivered++;
+            r.delivered++;
             continue;
         }
-
-        // 3) enqueue się nie udał -> cofamy ref
-        EV_CS_ENTER();
-        s_enq_fail++;
-        EV_CS_EXIT();
-
+        r.enq_fail++;
         lp_release(h);
     }
-
-    return delivered;
+    return r;
 }
 
-/* ====== API ====== */
+/* ====== PUBLIC API ====== */
 
 void ev_init(void)
 {
@@ -363,6 +330,11 @@ void ev_init(void)
     s_posts_ok    = 0;
     s_posts_drop  = 0;
     s_enq_fail    = 0;
+    
+    memset(s_ev_posts_ok,   0, sizeof(s_ev_posts_ok));
+    memset(s_ev_posts_drop, 0, sizeof(s_ev_posts_drop));
+    memset(s_ev_enq_fail,   0, sizeof(s_ev_enq_fail));
+    memset(s_ev_delivered,  0, sizeof(s_ev_delivered));
     EV_CS_EXIT();
 
 #if defined(CONFIG_CORE_EV_SCHEMA_SELFTEST_ON_BOOT) && CONFIG_CORE_EV_SCHEMA_SELFTEST_ON_BOOT
@@ -374,10 +346,8 @@ bool ev_subscribe(ev_queue_t* out_q, size_t depth)
 {
     if (!out_q) return false;
     if (depth == 0) depth = 8;
-
     ev_queue_t q = xQueueCreate((UBaseType_t)depth, sizeof(ev_msg_t));
     if (q == NULL) return false;
-
     bool attached = false;
     EV_CS_ENTER();
     if (s_subs_cnt < EV_MAX_SUBS) {
@@ -388,11 +358,7 @@ bool ev_subscribe(ev_queue_t* out_q, size_t depth)
         attached = true;
     }
     EV_CS_EXIT();
-
-    if (!attached) {
-        vQueueDelete(q);
-        return false;
-    }
+    if (!attached) { vQueueDelete(q); return false; }
     *out_q = q;
     return true;
 }
@@ -400,98 +366,112 @@ bool ev_subscribe(ev_queue_t* out_q, size_t depth)
 bool ev_unsubscribe(ev_queue_t q)
 {
     if (!q) return false;
-
     bool found = false;
     EV_CS_ENTER();
     for (uint16_t i = 0; i < s_subs_cnt; ++i) {
         if (s_subs[i].q == q) {
-            s_subs[i].q = NULL;  // zostaw slot pusty (bez kompaktowania)
+            s_subs[i].q = NULL;
             found = true;
             break;
         }
     }
     EV_CS_EXIT();
-
-    /* Nie wywołujemy tutaj vQueueDelete(q) – patrz komentarz w core_ev.h.
-     * Właściciel aktora powinien zniszczyć kolejkę dopiero po quiesce. */
     return found;
 }
 
 bool ev_post(ev_src_t src, uint16_t code, uint32_t a0, uint32_t a1)
 {
+    const ev_meta_t* meta = NULL;
 #if defined(CONFIG_CORE_EV_SCHEMA_GUARD) && CONFIG_CORE_EV_SCHEMA_GUARD
-    const ev_meta_t* meta = ev_schema_require_known_("ev_post", src, code);
-    ev_schema_require_kind_2_("ev_post", src, code, meta, EVK_NONE, EVK_COPY);
+    meta = ev_schema_require_known_("ev_post", src, code);
+    ev_schema_require_kind_3_("ev_post", src, code, meta, EVK_NONE, EVK_COPY, EVK_STREAM);
     ev_schema_require_none_payload_("ev_post", src, code, meta, a0, a1);
+#else
+    meta = ev_meta_find(src, code);
 #endif
 
-    ev_msg_t m = {
-        .src  = src,
-        .code = code,
-        .a0   = a0,
-        .a1   = a1,
-        .t_ms = now_ms(),
-    };
-    uint16_t n = ev_broadcast(&m);
+    const size_t idx = (meta ? (size_t)(meta - s_ev_meta) : (size_t)-1);
+    const ev_qos_t qos = (meta ? meta->qos : EVQ_DROP_NEW);
+
+    ev_msg_t m = { .src=src, .code=code, .a0=a0, .a1=a1, .t_ms=now_ms() };
+    const ev_fanout_t fo = ev_broadcast(&m, qos);
 
     EV_CS_ENTER();
-    if (n > 0) s_posts_ok++; else s_posts_drop++;
+    if (fo.enq_fail) {
+        s_enq_fail += fo.enq_fail;
+        if (idx != (size_t)-1) s_ev_enq_fail[idx] += (uint32_t)fo.enq_fail;
+    }
+    if (fo.delivered > 0) {
+        s_posts_ok++;
+        if (idx != (size_t)-1) {
+            s_ev_posts_ok[idx]++;
+            s_ev_delivered[idx] += (uint32_t)fo.delivered;
+        }
+    } else {
+        s_posts_drop++;
+        if (idx != (size_t)-1) s_ev_posts_drop[idx]++;
+    }
     EV_CS_EXIT();
 
-    return (n > 0);
+    return (fo.delivered > 0);
 }
 
 bool ev_post_lease(ev_src_t src, uint16_t code, lp_handle_t h, uint16_t len)
 {
     const uint32_t packed = lp_pack_handle_u32(h);
+    const ev_meta_t* meta = NULL;
 
 #if defined(CONFIG_CORE_EV_SCHEMA_GUARD) && CONFIG_CORE_EV_SCHEMA_GUARD
-    const ev_meta_t* meta = ev_schema_require_known_("ev_post_lease", src, code);
+    meta = ev_schema_require_known_("ev_post_lease", src, code);
     ev_schema_require_kind_1_("ev_post_lease", src, code, meta, EVK_LEASE);
-    if (packed == 0u) {
-        ev_schema_abort_("ev_post_lease", src, code, meta, "invalid lease handle (packed==0)");
+    if (meta->qos != EVQ_DROP_NEW) {
+        ev_schema_abort_("ev_post_lease", src, code, meta, "invalid qos for LEASE (must be DROP_NEW)");
     }
+    if (packed == 0u) ev_schema_abort_("ev_post_lease", src, code, meta, "invalid lease handle");
+#else
+    meta = ev_meta_find(src, code);
 #endif
 
-    /* Spakuj uchwyt do pól a0/a1. */
-    ev_msg_t m = {
-        .src  = src,
-        .code = code,
-        .a0   = packed,
-        .a1   = (uint32_t)len,
-        .t_ms = now_ms(),
-    };
+    ev_msg_t m = { .src=src, .code=code, .a0=packed, .a1=(uint32_t)len, .t_ms=now_ms() };
+    const size_t idx = meta ? (size_t)(meta - s_ev_meta) : (size_t)-1;
 
-    // PR1: addref -> enqueue (per sub) + undo na fail, żeby nie było UAF
-    uint16_t delivered = ev_broadcast_lease(&m, h);
-
-    // publisher zawsze oddaje swoją referencję (ownership transfer do busa)
+    const ev_fanout_t fo = ev_broadcast_lease(&m, h);
     lp_release(h);
 
     EV_CS_ENTER();
-    if (delivered > 0) s_posts_ok++; else s_posts_drop++;
+    if (fo.enq_fail) {
+        s_enq_fail += fo.enq_fail;
+        if (idx != (size_t)-1) s_ev_enq_fail[idx] += (uint32_t)fo.enq_fail;
+    }
+    if (fo.delivered > 0) {
+        s_posts_ok++;
+        if (idx != (size_t)-1) {
+            s_ev_posts_ok[idx]++;
+            s_ev_delivered[idx] += (uint32_t)fo.delivered;
+        }
+    } else {
+        s_posts_drop++;
+        if (idx != (size_t)-1) s_ev_posts_drop[idx]++;
+    }
     EV_CS_EXIT();
 
-    return (delivered > 0);
+    return (fo.delivered > 0);
 }
 
 bool ev_post_from_isr(ev_src_t src, uint16_t code, uint32_t a0, uint32_t a1)
 {
 #if defined(CONFIG_CORE_EV_SCHEMA_GUARD) && CONFIG_CORE_EV_SCHEMA_GUARD
     const ev_meta_t* meta = ev_schema_require_known_("ev_post_from_isr", src, code);
-    ev_schema_require_kind_2_("ev_post_from_isr", src, code, meta, EVK_NONE, EVK_COPY);
+    ev_schema_require_kind_3_("ev_post_from_isr", src, code, meta, EVK_NONE, EVK_COPY, EVK_STREAM);
     ev_schema_require_none_payload_("ev_post_from_isr", src, code, meta, a0, a1);
+#else
+    const ev_meta_t* meta = ev_meta_find(src, code);
 #endif
 
-    ev_msg_t m = {
-        .src  = src,
-        .code = code,
-        .a0   = a0,
-        .a1   = a1,
-        .t_ms = (uint32_t)(xTaskGetTickCountFromISR() * portTICK_PERIOD_MS),
-    };
+    ev_msg_t m = { .src=src, .code=code, .a0=a0, .a1=a1, .t_ms=(uint32_t)(xTaskGetTickCountFromISR()*portTICK_PERIOD_MS) };
+    const ev_qos_t qos = meta ? meta->qos : EVQ_DROP_NEW;
+    const size_t idx = meta ? (size_t)(meta - s_ev_meta) : (size_t)-1;
 
-    /* Snapshot subskrybentów (wariant ISR‑safe). */
     EV_CS_ENTER_ISR();
     uint16_t n = s_subs_cnt;
     ev_sub_t local[EV_MAX_SUBS];
@@ -500,40 +480,50 @@ bool ev_post_from_isr(ev_src_t src, uint16_t code, uint32_t a0, uint32_t a1)
     EV_CS_EXIT_ISR();
 
     uint16_t delivered = 0;
+    uint16_t enq_fail  = 0;
     BaseType_t hpw = pdFALSE;
 
     for (uint16_t i = 0; i < n; ++i) {
         if (local[i].q == NULL) continue;
-        if (xQueueSendFromISR(local[i].q, &m, &hpw) == pdTRUE) {
-            delivered++;
-        } else {
-            EV_CS_ENTER_ISR();
-            s_enq_fail++;
-            EV_CS_EXIT_ISR();
-        }
+        BaseType_t ok;
+        if (qos == EVQ_REPLACE_LAST && local[i].depth == 1) ok = xQueueOverwriteFromISR(local[i].q, &m, &hpw);
+        else ok = xQueueSendFromISR(local[i].q, &m, &hpw);
+
+        if (ok == pdTRUE) delivered++;
+        else enq_fail++;
     }
 
     EV_CS_ENTER_ISR();
-    if (delivered > 0) s_posts_ok++; else s_posts_drop++;
+    if (enq_fail) {
+        s_enq_fail += (uint32_t)enq_fail;
+        if (idx != (size_t)-1) s_ev_enq_fail[idx] += (uint32_t)enq_fail;
+    }
+    if (delivered > 0) {
+        s_posts_ok++;
+        if (idx != (size_t)-1) {
+            s_ev_posts_ok[idx]++;
+            s_ev_delivered[idx] += (uint32_t)delivered;
+        }
+    } else {
+        s_posts_drop++;
+        if (idx != (size_t)-1) s_ev_posts_drop[idx]++;
+    }
     EV_CS_EXIT_ISR();
 
-    if (hpw == pdTRUE) {
-        portYIELD_FROM_ISR();
-    }
+    if (hpw == pdTRUE) portYIELD_FROM_ISR();
     return (delivered > 0);
 }
 
 void ev_get_stats(ev_stats_t* out)
 {
     if (!out) return;
-
     EV_CS_ENTER();
-    /* Policz tylko faktycznych subskrybentów (q != NULL). */
     uint16_t subs = 0;
-    for (uint16_t i = 0; i < s_subs_cnt; ++i) {
-        if (s_subs[i].q) subs++;
-    }
-    out->subs        = subs;
+    for (uint16_t i = 0; i < s_subs_cnt; ++i) if (s_subs[i].q) subs++;
+    
+    /* FIX: Aktualizacja pól struktury ev_stats_t */
+    out->subs_active = subs;
+    out->subs_max    = EV_MAX_SUBS;
     out->q_depth_max = s_q_depth_max;
     out->posts_ok    = s_posts_ok;
     out->posts_drop  = s_posts_drop;
@@ -547,6 +537,97 @@ void ev_reset_stats(void)
     s_posts_ok   = 0;
     s_posts_drop = 0;
     s_enq_fail   = 0;
+    
+    memset(s_ev_posts_ok,   0, sizeof(s_ev_posts_ok));
+    memset(s_ev_posts_drop, 0, sizeof(s_ev_posts_drop));
+    memset(s_ev_enq_fail,   0, sizeof(s_ev_enq_fail));
+    memset(s_ev_delivered,  0, sizeof(s_ev_delivered));
     EV_CS_EXIT();
 }
 
+size_t ev_meta_count(void)
+{
+    return s_ev_meta_len;
+}
+
+const ev_meta_t* ev_meta_by_index(size_t idx)
+{
+    if (idx >= s_ev_meta_len) return NULL;
+    return &s_ev_meta[idx];
+}
+
+size_t ev_get_event_stats(ev_event_stats_t* out, size_t max)
+{
+    if (!out || max == 0) return 0;
+    size_t n = s_ev_meta_len;
+    if (max < n) n = max;
+
+    EV_CS_ENTER();
+    for (size_t i = 0; i < n; ++i) {
+        out[i].posts_ok   = s_ev_posts_ok[i];
+        out[i].posts_drop = s_ev_posts_drop[i];
+        out[i].enq_fail   = s_ev_enq_fail[i];
+        out[i].delivered  = s_ev_delivered[i];
+    }
+    EV_CS_EXIT();
+    return n;
+}
+
+const char* ev_kind_str(ev_kind_t kind) { return ev_kind_str_(kind); }
+const char* ev_qos_str(ev_qos_t qos)    { return ev_qos_str_(qos); }
+
+
+/* =========================
+ * PR7: EventBus jako port (vtbl) — default implementation (singleton)
+ *
+ * Uwaga: obecnie core__ev jest single-busem (globalny stan). self nie jest używane,
+ * ale zostawiamy je w interfejsie, żeby w przyszłości łatwo przejść na wiele instancji.
+ * ========================= */
+
+static bool bus_post_(void* self, ev_src_t src, uint16_t code, uint32_t a0, uint32_t a1)
+{
+    (void)self;
+    return ev_post(src, code, a0, a1);
+}
+
+static bool bus_post_lease_(void* self, ev_src_t src, uint16_t code, lp_handle_t h, uint16_t len)
+{
+    (void)self;
+    return ev_post_lease(src, code, h, len);
+}
+
+static bool bus_post_from_isr_(void* self, ev_src_t src, uint16_t code, uint32_t a0, uint32_t a1)
+{
+    (void)self;
+    return ev_post_from_isr(src, code, a0, a1);
+}
+
+static bool bus_subscribe_(void* self, ev_queue_t* out_q, size_t depth)
+{
+    (void)self;
+    return ev_subscribe(out_q, depth);
+}
+
+static bool bus_unsubscribe_(void* self, ev_queue_t q)
+{
+    (void)self;
+    return ev_unsubscribe(q);
+}
+
+static const ev_bus_vtbl_t s_bus_vtbl = {
+    .post         = bus_post_,
+    .post_lease   = bus_post_lease_,
+    .post_from_isr= bus_post_from_isr_,
+    .subscribe    = bus_subscribe_,
+    .unsubscribe  = bus_unsubscribe_,
+};
+
+static const ev_bus_t s_bus = {
+    .self = NULL,
+    .vtbl = &s_bus_vtbl,
+};
+
+const ev_bus_t* ev_bus_default(void)
+{
+    return &s_bus;
+}

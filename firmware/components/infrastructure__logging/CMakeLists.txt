@@ -7,6 +7,7 @@ idf_component_register(
     SRCS
         "logging_idf.c"
         "logging_cli.c"
+        "infra_log_stream.c"
     INCLUDE_DIRS
         "include"
     PRIV_INCLUDE_DIRS
@@ -18,4 +19,6 @@ idf_component_register(
         vfs             # esp_vfs_dev.h (REPL przez UART0)
         esp_driver_uart # nowy sterownik UART (nagłówek: driver/uart.h)
         core__ev        # event bus: evstat + API
+        core__spsc_ring # STREAM: SPSC ring-buffer (claim/commit)
+        core__leasepool  # lpstat
 )

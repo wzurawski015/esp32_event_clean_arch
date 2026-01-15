@@ -5,7 +5,6 @@ idf_component_register(
   "include"
   REQUIRES
   core__ev
-  core__leasepool
   infrastructure__logging
   ports
   PRIV_REQUIRES

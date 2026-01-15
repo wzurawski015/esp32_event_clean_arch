@@ -35,6 +35,24 @@ config INFRA_LOG_RINGBUF_KB
     help
       Pojemność bufora w kilobajtach (zalecane: 8..32 KB).
 
+config INFRA_LOG_STREAM
+    bool "Log-stream (SPSC ring + EV_LOG_READY)"
+    default y
+    help
+      Włącza dodatkowy kanał "log-stream" oparty o SPSC ring-buffer
+      (core__spsc_ring) bez alokacji per-event.
+      Producent zapisuje bajty do ringu i publikuje tylko lekką notyfikację
+      EV_LOG_READY (kind STREAM).
+
+config INFRA_LOG_STREAM_RING_SIZE
+    int "Rozmiar log-stream ring (bajty, potęga 2)"
+    depends on INFRA_LOG_STREAM
+    range 512 65536
+    default 4096
+    help
+      Pojemność ringu dla streamu logów. Musi być potęgą 2
+      (np. 1024/2048/4096/8192...).
+
 # =================== CLI (opcjonalnie, zależne od ring-bufora) ===================
 
 config INFRA_LOG_CLI

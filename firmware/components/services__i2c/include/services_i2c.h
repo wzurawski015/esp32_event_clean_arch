@@ -4,6 +4,8 @@
 #include <stdint.h>
 
 #include "esp_err.h"
+#include "core_ev.h"
+
 #include "idf_i2c_port.h" /* i2c_bus_t, i2c_dev_t */
 
 #ifdef __cplusplus
@@ -31,7 +33,7 @@ extern "C"
     } i2c_req_t;
 
     /* start workera: długość kolejki, rozmiar stosu, priorytet taska */
-    bool services_i2c_start(int queue_len, int task_stack, int task_prio);
+    bool services_i2c_start(const ev_bus_t* bus, int queue_len, int task_stack, int task_prio);
 
     /* dodaj żądanie do kolejki (kopiuje bufor TX i przygotowuje staging RX) */
     bool services_i2c_submit(const i2c_req_t* req);

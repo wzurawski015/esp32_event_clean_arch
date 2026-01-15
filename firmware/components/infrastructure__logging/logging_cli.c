@@ -3,7 +3,7 @@
 
 #include "infra_log_rb.h"
 #include "ports/log_port.h"
-#include "ports/spi_port.h" // Obsługa SPI
+#include "ports/spi_port.h"
 
 #if CONFIG_INFRA_LOG_CLI
 
@@ -27,8 +27,8 @@
 #include <inttypes.h>
 
 /* komendy: evstat + schema */
-#include "core_ev.h"   // EV_SCHEMA pochodzi z core_ev.h (SSOT)
-#include "core/leasepool.h" // Do alokacji payloadu dla UART
+#include "core_ev.h"
+#include "core/leasepool.h"
 
 #define TAG "LOGCLI"
 
@@ -291,9 +291,8 @@ static void evstat_list_one_(evstat_list_ctx_t* c, const char* name, ev_src_t sr
         printf("--  ----- ------ ------ ------------------------\n");
     }
 
-    /* Rzutowanie na unsigned, aby uniknąć błędów formatowania */
     printf("%-3u %-5s 0x%04X %-6s %s\n", (unsigned)id, ev_src_str_short(src), (unsigned)code, ev_kind_str_short(kind), name);
-    (void)qos; (void)doc; // używane w pełnej wersji, tu uciszamy warning
+    (void)qos; (void)doc; 
     c->shown++;
 }
 
@@ -309,6 +308,84 @@ static int cmd_evstat_list(int argc, char** argv)
     EV_SCHEMA(X)
 #undef X
     return 0;
+}
+
+typedef enum {
+    EVSHOW_BY_ID = 0, EVSHOW_BY_NAME, EVSHOW_BY_SRC_CODE,
+} evshow_mode_t;
+
+typedef struct {
+    evshow_mode_t mode;
+    unsigned target_id; const char* target_name; ev_src_t target_src; uint16_t target_code;
+    bool found; unsigned id; const char* name; ev_src_t src; uint16_t code; ev_kind_t kind; ev_qos_t qos; uint16_t flags; const char* doc;
+    unsigned idx;
+} evstat_show_ctx_t;
+
+static void evstat_show_one_(evstat_show_ctx_t* c, const char* name, ev_src_t src, uint16_t code, ev_kind_t kind, ev_qos_t qos, uint16_t flags, const char* doc)
+{
+    const unsigned id = c->idx++;
+    if (c->found) return;
+
+    bool match = false;
+    switch (c->mode) {
+        case EVSHOW_BY_ID: match = (id == c->target_id); break;
+        case EVSHOW_BY_NAME: match = str_ieq_(name, c->target_name); break;
+        case EVSHOW_BY_SRC_CODE: match = (src == c->target_src && code == c->target_code); break;
+    }
+
+    if (match) {
+        c->found=true; c->id=id; c->name=name; c->src=src; c->code=code; c->kind=kind; c->qos=qos; c->flags=flags; c->doc=doc;
+    }
+}
+
+static int cmd_evstat_show(int argc, char** argv)
+{
+    if (argc < 2) { evstat_usage_(); return 2; }
+    const char* key = argv[1];
+    evstat_show_ctx_t c = {0}; c.idx = 0;
+    uint32_t v = 0;
+
+    if (parse_u32_(key, &v) && v < ev_schema_total_()) {
+        c.mode = EVSHOW_BY_ID; c.target_id = (unsigned)v;
+    } else {
+        const char* colon = strchr(key, ':');
+        if (colon) {
+            /* SRC:CODE logic simplified */
+            ev_src_t src=0; uint32_t code=0;
+            // W tej wersji uproszczonej zakładamy tylko name lub ID dla stabilności, 
+            // ale jeśli chcesz pełną obsługę SRC:CODE, to wymagałoby więcej parsowania.
+            // Tutaj fallback do NAME.
+            c.mode = EVSHOW_BY_NAME; c.target_name = key;
+        } else {
+            c.mode = EVSHOW_BY_NAME; c.target_name = key;
+        }
+    }
+
+#define X(NAME, SRC, CODE, KIND, QOS, FLAGS, DOC) evstat_show_one_(&c, #NAME, (SRC), (uint16_t)(CODE), EVK_##KIND, EVQ_##QOS, (uint16_t)(FLAGS), (DOC));
+    EV_SCHEMA(X)
+#undef X
+
+    if (!c.found) { printf("ERR: not found: %s\n", key); return 1; }
+    printf("EV[%u] %s\n src: %s(0x%04X) code:0x%04X kind:%s\n api: %s\n", 
+           (unsigned)c.id, c.name, ev_src_str_short(c.src), (unsigned)c.src, (unsigned)c.code, 
+           ev_kind_str_short(c.kind), ev_api_hint_(c.kind, c.qos));
+    return 0;
+}
+
+static int cmd_evstat_check(int argc, char** argv) {
+    (void)argc; (void)argv;
+    /* Prosty check na duplikaty (O(N^2)) */
+    int issues = 0;
+    for(unsigned i=0; i<s_schema_rows_len; ++i) {
+        for(unsigned j=i+1; j<s_schema_rows_len; ++j) {
+            if(s_schema_rows[i].src == s_schema_rows[j].src && s_schema_rows[i].code == s_schema_rows[j].code) {
+                printf("FAIL: dup src/code %s vs %s\n", s_schema_rows[i].name, s_schema_rows[j].name);
+                issues++;
+            }
+        }
+    }
+    printf("evstat check: %s (entries=%u)\n", issues?"FAIL":"OK", (unsigned)s_schema_rows_len);
+    return issues ? 1 : 0;
 }
 
 static int cmd_evstat_stat(int argc, char** argv)
@@ -329,7 +406,6 @@ static int cmd_evstat_stat(int argc, char** argv)
             ev_get_event_stats(st, s_schema_rows_len);
             printf("id  src   code   posts_ok   name\n");
             for(unsigned i=0; i<s_schema_rows_len; ++i) {
-                 // FIX: Rzutowanie posts_ok na unsigned
                  printf("%-3u %-5s 0x%04X %-10u %s\n", (unsigned)i, ev_src_str_short(s_schema_rows[i].src), 
                         (unsigned)s_schema_rows[i].code, (unsigned)st[i].posts_ok, s_schema_rows[i].name);
             }
@@ -344,7 +420,8 @@ static int cmd_evstat(int argc, char **argv)
     if (argc < 2) return cmd_evstat_stat(argc, argv);
     if (!strcmp(argv[1], "stat")) return cmd_evstat_stat(argc-1, argv+1);
     if (!strcmp(argv[1], "list")) return cmd_evstat_list(argc-1, argv+1);
-    if (!strcmp(argv[1], "check")) { printf("evstat check: OK (stub)\n"); return 0; }
+    if (!strcmp(argv[1], "show")) return cmd_evstat_show(argc-1, argv+1);
+    if (!strcmp(argv[1], "check")) return cmd_evstat_check(argc-1, argv+1);
     evstat_usage_();
     return 0;
 }
@@ -418,7 +495,6 @@ esp_err_t infra_log_cli_register(void)
 
     ESP_ERROR_CHECK_WITHOUT_ABORT(esp_console_register_help_command());
 
-    // Zmiana nazw zmiennych, aby uniknąć konfliktu z funkcjami (shadowing)
     const esp_console_cmd_t c_logrb = { .command="logrb", .help="logrb stat|clear|dump|tail", .func=&cmd_logrb };
     esp_console_cmd_register(&c_logrb);
 

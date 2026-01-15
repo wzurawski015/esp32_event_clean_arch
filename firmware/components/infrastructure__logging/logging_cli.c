@@ -26,6 +26,7 @@
 
 /* komendy: evstat + schema */
 #include "core_ev.h"   // EV_SCHEMA pochodzi z core_ev.h (SSOT)
+#include "core/leasepool.h" // Do alokacji payloadu dla UART
 
 #define TAG "LOGCLI"
 
@@ -162,7 +163,7 @@ static const char* ev_src_str_short(ev_src_t src)
         case EV_SRC_LCD:   return "LCD";
         case EV_SRC_DS18:  return "DS18";
         case EV_SRC_LOG:   return "LOG";
-        case EV_SRC_UART:   return "UART";
+        case EV_SRC_UART:  return "UART";
         default:           return "UNK";
     }
 }
@@ -220,7 +221,7 @@ static bool parse_src_(const char* s, ev_src_t* out)
     if (str_ieq_(s, "LCD"))   { *out = EV_SRC_LCD;   return true; }
     if (str_ieq_(s, "DS18") || str_ieq_(s, "DS18B20")) { *out = EV_SRC_DS18; return true; }
     if (str_ieq_(s, "LOG"))   { *out = EV_SRC_LOG;   return true; }
-    if (str_ieq_(s, "UART"))   { *out = EV_SRC_UART;   return true; }
+    if (str_ieq_(s, "UART"))  { *out = EV_SRC_UART;  return true; }
 
     return false;
 }
@@ -306,8 +307,7 @@ typedef struct {
 } ev_schema_row_t;
 
 static const ev_schema_row_t s_schema_rows[] = {
-#define X(NAME, SRC, CODE, KIND, QOS, FLAGS, DOC) \
-    { .name = #NAME, .src = (SRC), .code = (uint16_t)(CODE), .kind = EVK_##KIND, .qos = EVQ_##QOS, .flags = (uint16_t)(FLAGS), .doc = (DOC) },
+#define X(NAME, SRC, CODE, KIND, QOS, FLAGS, DOC)     { .name = #NAME, .src = (SRC), .code = (uint16_t)(CODE), .kind = EVK_##KIND, .qos = EVQ_##QOS, .flags = (uint16_t)(FLAGS), .doc = (DOC) },
     EV_SCHEMA(X)
 #undef X
 };
@@ -470,8 +470,7 @@ static int cmd_evstat_list(int argc, char** argv)
     c.idx = 0;
     c.shown = 0;
 
-#define X(NAME, SRC, CODE, KIND, QOS, FLAGS, DOC) \
-    evstat_list_one_(&c, #NAME, (SRC), (uint16_t)(CODE), EVK_##KIND, EVQ_##QOS, (DOC));
+#define X(NAME, SRC, CODE, KIND, QOS, FLAGS, DOC)     evstat_list_one_(&c, #NAME, (SRC), (uint16_t)(CODE), EVK_##KIND, EVQ_##QOS, (DOC));
     EV_SCHEMA(X)
 #undef X
 
@@ -610,8 +609,7 @@ static int cmd_evstat_show(int argc, char** argv)
         }
     }
 
-#define X(NAME, SRC, CODE, KIND, QOS, FLAGS, DOC) \
-    evstat_show_one_(&c, #NAME, (SRC), (uint16_t)(CODE), EVK_##KIND, EVQ_##QOS, (uint16_t)(FLAGS), (DOC));
+#define X(NAME, SRC, CODE, KIND, QOS, FLAGS, DOC)     evstat_show_one_(&c, #NAME, (SRC), (uint16_t)(CODE), EVK_##KIND, EVQ_##QOS, (uint16_t)(FLAGS), (DOC));
     EV_SCHEMA(X)
 #undef X
 
@@ -950,6 +948,41 @@ static int cmd_lpstat(int argc, char **argv)
     return 2;
 }
 
+/* ===================== komenda: uart_send (Loopback Test) ===================== */
+static int cmd_uart_send(int argc, char** argv)
+{
+    if (argc < 2) {
+        printf("użycie: uart_send <tekst>\n");
+        return 0;
+    }
+
+    const char* msg = argv[1];
+    size_t len = strlen(msg);
+    
+    // 1. Alokuj Lease (Zero-Copy TX)
+    lp_handle_t h = lp_alloc_try((uint32_t)len + 1); // +1 na null
+    if (!lp_handle_is_valid(h)) {
+        printf("ERR: LeasePool full!\n");
+        return 1;
+    }
+
+    // 2. Wpisz dane
+    lp_view_t v;
+    if (lp_acquire(h, &v)) {
+        memcpy(v.ptr, msg, len);
+        ((char*)v.ptr)[len] = '\0'; // bezpiecznik
+        lp_commit(h, (uint32_t)len);
+        
+        // 3. Wyślij żądanie do serwisu
+        ev_post_lease(EV_SRC_UART, EV_UART_TX_REQ, h, (uint16_t)len);
+        printf("Wysłano %u bajtów na UART (EV_UART_TX_REQ)\n", (unsigned)len);
+    } else {
+        lp_release(h);
+        printf("ERR: Lease acquire failed\n");
+    }
+    return 0;
+}
+
 /* ==================== rejestracja CLI (idempotentna) ==================== */
 
 static bool s_cmds_registered = false;
@@ -1002,8 +1035,17 @@ esp_err_t infra_log_cli_register(void)
     };
     ESP_ERROR_CHECK_WITHOUT_ABORT(esp_console_cmd_register(&cmd_lpstat_desc));
 
+    const esp_console_cmd_t cmd_uart_desc = {
+        .command = "uart_send",
+        .help    = "uart_send <text>  (Wysyła ramkę przez EV_UART_TX_REQ -> Serwis UART)",
+        .hint    = NULL,
+        .func    = &cmd_uart_send,
+        .argtable= NULL
+    };
+    ESP_ERROR_CHECK_WITHOUT_ABORT(esp_console_cmd_register(&cmd_uart_desc));
+
     s_cmds_registered = true;
-    ESP_LOGI(TAG, "registered 'logrb', 'loglvl', 'evstat' and 'lpstat' commands");
+    ESP_LOGI(TAG, "registered 'logrb', 'loglvl', 'evstat', 'lpstat' and 'uart_send' commands");
     return ESP_OK;
 }
 
@@ -1119,4 +1161,3 @@ esp_err_t infra_log_cli_register(void)   { return ESP_OK; }
 esp_err_t infra_log_cli_start_repl(void) { return ESP_OK; }
 
 #endif  // CONFIG_INFRA_LOG_CLI
-

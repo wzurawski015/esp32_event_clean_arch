@@ -139,7 +139,7 @@ Wybrane komponenty (prefiks = warstwa):
 - `components/ports` — „czyste” interfejsy (np. I²C).
 - `components/infrastructure__idf_i2c_port` — adapter nowego I²C (`driver/i2c_master.h`).
 - `components/services__i2c` — asynchroniczny worker I²C (`EV_I2C_DONE`).
-- `components/services__timer` — `EV_TICK_100MS`, `EV_TICK_1S` na `esp_timer`.
+- `components/services__timer` — deadline-driven timer: uzbraja najbliższy deadline i publikuje zdarzenia; opcjonalnie (Kconfig) generuje legacy `EV_TICK_*`.
 - `components/drivers__lcd1602rgb_dfr_async` — DFR0464 (ST7032 + PCA9633) jako FSM, bez blokad; parametry przez Kconfig.
 - `components/services__ds18b20_ev` — asynchroniczny DS18B20 (tryb one‑shot).
 

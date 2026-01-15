@@ -1,6 +1,6 @@
 /**
  * @file main.c
- * @brief Minimalny przykład: event-bus + EV_TICK_1S/100MS + log.
+ * @brief Minimalny przykład: event-bus + deadline-driven timer (bez globalnego tick-spamu).
  */
 #include "core_ev.h"
 #include "ports/log_port.h"
@@ -17,6 +17,9 @@ void app_main(void)
 
     ev_queue_t q;
     ev_subscribe(&q, 16);
+
+    // Jawnie uzbrój „heartbeat” 1s – ticki nie są generowane automatycznie (domyślnie).
+    (void)services_timer_arm_periodic_us(1000000ULL, EV_SRC_TIMER, EV_TICK_1S, 0, 0);
 
     LOGI(TAG, "Start aplikacji (event-driven)");
 

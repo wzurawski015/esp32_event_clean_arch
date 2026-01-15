@@ -99,11 +99,6 @@ static void app_demo_lcd_task(void* arg)
             continue;
         }
 
-        // 3) Diagnostyczne „tyknięcie”
-        if (m.src == EV_SRC_TIMER && m.code == EV_TICK_1S) {
-            LOGD(TAG, "[%u ms] tick", (unsigned)m.t_ms);
-            continue;
-        }
     }
 }
 

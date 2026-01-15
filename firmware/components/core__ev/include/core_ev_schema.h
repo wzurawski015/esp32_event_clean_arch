@@ -19,8 +19,8 @@
     X(EV_SYS_START,        EV_SRC_SYS,   0x0001, NONE,  DROP_NEW,     EVF_CRITICAL, "start systemu") \
     \
     /* TIMER */ \
-    X(EV_TICK_100MS,       EV_SRC_TIMER, 0x1000, NONE,  DROP_NEW,     0,           "tick 100ms") \
-    X(EV_TICK_1S,          EV_SRC_TIMER, 0x1001, NONE,  DROP_NEW,     0,           "tick 1s") \
+    X(EV_TICK_100MS,       EV_SRC_TIMER, 0x1000, NONE,  DROP_NEW,     0,           "tick 100ms (legacy; domyślnie OFF)") \
+    X(EV_TICK_1S,          EV_SRC_TIMER, 0x1001, NONE,  DROP_NEW,     0,           "tick 1s (legacy; domyślnie OFF)") \
     \
     /* I2C */ \
     X(EV_I2C_DONE,         EV_SRC_I2C,   0x2000, COPY,  DROP_NEW,     0,           "I2C done: a0=user, a1=0") \

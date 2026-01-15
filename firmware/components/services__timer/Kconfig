@@ -1,0 +1,19 @@
+menu "Services: deadline timer"
+
+config SERVICES_TIMER_MAX_SLOTS
+    int "Max. liczba aktywnych deadline'ów"
+    range 4 64
+    default 16
+    help
+        Maksymalna liczba równocześnie uzbrojonych timerów (deadline'ów)
+        utrzymywanych przez komponent services__timer.
+
+config SERVICES_TIMER_ENABLE_LEGACY_TICKS
+    bool "(Legacy) Generuj EV_TICK_100MS / EV_TICK_1S automatycznie"
+    default n
+    help
+        Jeśli włączone, services__timer po starcie uzbraja dwa periodyczne timery
+        i publikuje EV_TICK_100MS oraz EV_TICK_1S (zachowanie jak w starszych wersjach).
+        Domyślnie wyłączone — preferowane jest explicit armowanie deadline'ów.
+
+endmenu

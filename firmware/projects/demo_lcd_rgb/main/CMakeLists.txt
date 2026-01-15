@@ -3,18 +3,19 @@ idf_component_register(
     INCLUDE_DIRS "."
     REQUIRES
         core__ev
-        core__leasepool       # +++ nowa zależność (lease-pool)
+        core__leasepool
         ports
         services__timer
         services__i2c
+        services__uart                # +++ NOWOŚĆ: Serwis UART
         infrastructure__idf_i2c_port
+        infrastructure__idf_uart_port # +++ NOWOŚĆ: Adapter UART
         drivers__lcd1602rgb_dfr_async
         infrastructure__logging
-        app__log_bus          # +++ nowa zależność (most log->EV)
-        app__demo_lcd         # +++ nowa zależność (aktor LCD)
+        app__log_bus
+        app__demo_lcd
 )
 
-# (Opcjonalnie) jeśli używasz komendy 'logrb' (esp_console):
 if(CONFIG_INFRA_LOG_CLI)
     target_link_libraries(${COMPONENT_LIB} PRIVATE idf::console)
 endif()

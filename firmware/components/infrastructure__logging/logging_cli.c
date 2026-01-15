@@ -350,11 +350,7 @@ static int cmd_evstat_show(int argc, char** argv)
     } else {
         const char* colon = strchr(key, ':');
         if (colon) {
-            /* SRC:CODE logic simplified */
-            ev_src_t src=0; uint32_t code=0;
-            // W tej wersji uproszczonej zakładamy tylko name lub ID dla stabilności, 
-            // ale jeśli chcesz pełną obsługę SRC:CODE, to wymagałoby więcej parsowania.
-            // Tutaj fallback do NAME.
+            /* SRC:CODE simplified logic - using dummy vars to satisfy compiler if needed */
             c.mode = EVSHOW_BY_NAME; c.target_name = key;
         } else {
             c.mode = EVSHOW_BY_NAME; c.target_name = key;
@@ -374,7 +370,6 @@ static int cmd_evstat_show(int argc, char** argv)
 
 static int cmd_evstat_check(int argc, char** argv) {
     (void)argc; (void)argv;
-    /* Prosty check na duplikaty (O(N^2)) */
     int issues = 0;
     for(unsigned i=0; i<s_schema_rows_len; ++i) {
         for(unsigned j=i+1; j<s_schema_rows_len; ++j) {
@@ -472,9 +467,10 @@ static int cmd_spi_test(int argc, char** argv) {
         printf("SPI already init\n");
         return 0;
     }
+    // FIX: Używamy host_id = 1 (SPI2_HOST) bo 0 (SPI1/Flash) jest zajęty
     spi_bus_cfg_t cfg = {
         .mosi_io = 19, .miso_io = 20, .sclk_io = 21,
-        .max_transfer_sz = 128, .enable_dma = true, .host_id = 0
+        .max_transfer_sz = 128, .enable_dma = true, .host_id = 1
     };
     port_err_t err = spi_bus_create(&cfg, &s_test_spi_bus);
     if (err == PORT_OK) {

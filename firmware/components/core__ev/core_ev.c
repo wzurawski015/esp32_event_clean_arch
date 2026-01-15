@@ -160,12 +160,6 @@ static void ev_schema_require_kind_1_(const char* api, ev_src_t src, uint16_t co
     if (meta->kind != k0) ev_schema_abort_(api, src, code, meta, "wrong API for event kind");
 }
 
-static void ev_schema_require_kind_2_(const char* api, ev_src_t src, uint16_t code, const ev_meta_t* meta, ev_kind_t k0, ev_kind_t k1)
-{
-    if (!meta) ev_schema_abort_(api, src, code, NULL, "internal: meta==NULL");
-    if (!(meta->kind == k0 || meta->kind == k1)) ev_schema_abort_(api, src, code, meta, "wrong API for event kind");
-}
-
 static void ev_schema_require_kind_3_(const char* api, ev_src_t src, uint16_t code, const ev_meta_t* meta, ev_kind_t k0, ev_kind_t k1, ev_kind_t k2)
 {
     if (!meta) ev_schema_abort_(api, src, code, NULL, "internal: meta==NULL");

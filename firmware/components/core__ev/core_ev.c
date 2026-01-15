@@ -93,7 +93,6 @@ enum { EV_META_LEN = (int)(sizeof(s_ev_meta) / sizeof(s_ev_meta[0])) };
 
 static const size_t s_ev_meta_len = (size_t)EV_META_LEN;
 
-/* FIX: Poprawione nazwy tablic statystyk (usunięto 't' z s_evt_) */
 static uint32_t s_ev_posts_ok[EV_META_LEN];
 static uint32_t s_ev_posts_drop[EV_META_LEN];
 static uint32_t s_ev_enq_fail[EV_META_LEN];
@@ -239,7 +238,8 @@ static void ev_schema_selftest_or_abort_(void)
             EV_DIAG_PRINTF("EV SCHEMA SELFTEST FAIL: invalid qos idx=%u\n", (unsigned)i);
             issues++;
         }
-        if (m->qos == EVQ_REPLACE_LAST && (m->kind != EVK_NONE && m->kind != EVK_COPY)) {
+        /* FIX: Dodano EVK_STREAM do dozwolonych typów dla REPLACE_LAST */
+        if (m->qos == EVQ_REPLACE_LAST && (m->kind != EVK_NONE && m->kind != EVK_COPY && m->kind != EVK_STREAM)) {
             EV_DIAG_PRINTF("EV SCHEMA SELFTEST FAIL: qos=REPLACE_LAST invalid for kind idx=%u\n", (unsigned)i);
             issues++;
         }

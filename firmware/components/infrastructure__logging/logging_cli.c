@@ -162,6 +162,7 @@ static const char* ev_src_str_short(ev_src_t src)
         case EV_SRC_LCD:   return "LCD";
         case EV_SRC_DS18:  return "DS18";
         case EV_SRC_LOG:   return "LOG";
+        case EV_SRC_UART:   return "UART";
         default:           return "UNK";
     }
 }
@@ -219,6 +220,7 @@ static bool parse_src_(const char* s, ev_src_t* out)
     if (str_ieq_(s, "LCD"))   { *out = EV_SRC_LCD;   return true; }
     if (str_ieq_(s, "DS18") || str_ieq_(s, "DS18B20")) { *out = EV_SRC_DS18; return true; }
     if (str_ieq_(s, "LOG"))   { *out = EV_SRC_LOG;   return true; }
+    if (str_ieq_(s, "UART"))   { *out = EV_SRC_UART;   return true; }
 
     return false;
 }

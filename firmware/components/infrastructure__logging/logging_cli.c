@@ -24,6 +24,7 @@
 #include <stdbool.h>
 #include <ctype.h>
 #include <errno.h>
+#include <inttypes.h>
 
 /* komendy: evstat + schema */
 #include "core_ev.h"   // EV_SCHEMA pochodzi z core_ev.h (SSOT)
@@ -111,9 +112,7 @@ static int cmd_logrb(int argc, char** argv)
 #endif // CONFIG_INFRA_LOG_RINGBUF
 }
 
-/* ========================= loglvl =========================
- * Zmiana poziomu logów w locie: loglvl <TAG|*> <E|W|I|D|V>
- */
+/* ========================= loglvl ========================= */
 static int cmd_loglvl(int argc, char** argv)
 {
     if (argc < 3) {
@@ -292,7 +291,9 @@ static void evstat_list_one_(evstat_list_ctx_t* c, const char* name, ev_src_t sr
         printf("--  ----- ------ ------ ------------------------\n");
     }
 
-    printf("%-3u %-5s 0x%04X %-6s %s\n", id, ev_src_str_short(src), (unsigned)code, ev_kind_str_short(kind), name);
+    /* Rzutowanie na unsigned, aby uniknąć błędów formatowania */
+    printf("%-3u %-5s 0x%04X %-6s %s\n", (unsigned)id, ev_src_str_short(src), (unsigned)code, ev_kind_str_short(kind), name);
+    (void)qos; (void)doc; // używane w pełnej wersji, tu uciszamy warning
     c->shown++;
 }
 
@@ -318,7 +319,7 @@ static int cmd_evstat_stat(int argc, char** argv)
     ev_stats_t s;
     ev_get_stats(&s);
     printf("evstat: subs=%u (max=%u) depth_max=%u total_ev=%u\n",
-           (unsigned)s.subs_active, (unsigned)s.subs_max, (unsigned)s.q_depth_max, ev_schema_total_());
+           (unsigned)s.subs_active, (unsigned)s.subs_max, (unsigned)s.q_depth_max, (unsigned)ev_schema_total_());
     printf("  posts_ok=%u posts_drop=%u enq_fail=%u\n",
            (unsigned)s.posts_ok, (unsigned)s.posts_drop, (unsigned)s.enq_fail);
 
@@ -328,8 +329,9 @@ static int cmd_evstat_stat(int argc, char** argv)
             ev_get_event_stats(st, s_schema_rows_len);
             printf("id  src   code   posts_ok   name\n");
             for(unsigned i=0; i<s_schema_rows_len; ++i) {
-                 printf("%-3u %-5s 0x%04X %-10u %s\n", i, ev_src_str_short(s_schema_rows[i].src), 
-                        s_schema_rows[i].code, st[i].posts_ok, s_schema_rows[i].name);
+                 // FIX: Rzutowanie posts_ok na unsigned
+                 printf("%-3u %-5s 0x%04X %-10u %s\n", (unsigned)i, ev_src_str_short(s_schema_rows[i].src), 
+                        (unsigned)s_schema_rows[i].code, (unsigned)st[i].posts_ok, s_schema_rows[i].name);
             }
             free(st);
         }
@@ -337,13 +339,11 @@ static int cmd_evstat_stat(int argc, char** argv)
     return 0;
 }
 
-/* Uproszczona wersja cmd_evstat dla oszczędności miejsca, ale z pełną funkcjonalnością */
 static int cmd_evstat(int argc, char **argv)
 {
     if (argc < 2) return cmd_evstat_stat(argc, argv);
     if (!strcmp(argv[1], "stat")) return cmd_evstat_stat(argc-1, argv+1);
     if (!strcmp(argv[1], "list")) return cmd_evstat_list(argc-1, argv+1);
-    // Stuby dla show/check (można rozwinąć w razie potrzeby)
     if (!strcmp(argv[1], "check")) { printf("evstat check: OK (stub)\n"); return 0; }
     evstat_usage_();
     return 0;
@@ -352,6 +352,7 @@ static int cmd_evstat(int argc, char **argv)
 /* ===================== komendy: lpstat ===================== */
 static int cmd_lpstat(int argc, char **argv)
 {
+    (void)argc; (void)argv;
     lp_stats_t st = {0};
     lp_get_stats(&st);
     printf("lp: total=%u free=%u used=%u peak=%u alloc_ok=%u alloc_fail=%u guard_fail=%u\n",
@@ -394,7 +395,6 @@ static int cmd_spi_test(int argc, char** argv) {
         printf("SPI already init\n");
         return 0;
     }
-    /* Domyślne piny dla ESP32-C6 DevKit */
     spi_bus_cfg_t cfg = {
         .mosi_io = 19, .miso_io = 20, .sclk_io = 21,
         .max_transfer_sz = 128, .enable_dma = true, .host_id = 0
@@ -418,23 +418,24 @@ esp_err_t infra_log_cli_register(void)
 
     ESP_ERROR_CHECK_WITHOUT_ABORT(esp_console_register_help_command());
 
-    const esp_console_cmd_t cmd_logrb = { .command="logrb", .help="logrb stat|clear|dump|tail", .func=&cmd_logrb };
-    esp_console_cmd_register(&cmd_logrb);
+    // Zmiana nazw zmiennych, aby uniknąć konfliktu z funkcjami (shadowing)
+    const esp_console_cmd_t c_logrb = { .command="logrb", .help="logrb stat|clear|dump|tail", .func=&cmd_logrb };
+    esp_console_cmd_register(&c_logrb);
 
-    const esp_console_cmd_t cmd_loglvl = { .command="loglvl", .help="loglvl <TAG> <L>", .func=&cmd_loglvl };
-    esp_console_cmd_register(&cmd_loglvl);
+    const esp_console_cmd_t c_loglvl = { .command="loglvl", .help="loglvl <TAG> <L>", .func=&cmd_loglvl };
+    esp_console_cmd_register(&c_loglvl);
 
-    const esp_console_cmd_t cmd_evstat = { .command="evstat", .help="evstat stat|list|check", .func=&cmd_evstat };
-    esp_console_cmd_register(&cmd_evstat);
+    const esp_console_cmd_t c_evstat = { .command="evstat", .help="evstat stat|list|check", .func=&cmd_evstat };
+    esp_console_cmd_register(&c_evstat);
 
-    const esp_console_cmd_t cmd_lpstat = { .command="lpstat", .help="lpstat", .func=&cmd_lpstat };
-    esp_console_cmd_register(&cmd_lpstat);
+    const esp_console_cmd_t c_lpstat = { .command="lpstat", .help="lpstat", .func=&cmd_lpstat };
+    esp_console_cmd_register(&c_lpstat);
 
-    const esp_console_cmd_t cmd_uart = { .command="uart_send", .help="uart_send <msg>", .func=&cmd_uart_send };
-    esp_console_cmd_register(&cmd_uart);
+    const esp_console_cmd_t c_uart = { .command="uart_send", .help="uart_send <msg>", .func=&cmd_uart_send };
+    esp_console_cmd_register(&c_uart);
 
-    const esp_console_cmd_t cmd_spi = { .command="spi_test", .help="Init SPI bus to verify driver", .func=&cmd_spi_test };
-    esp_console_cmd_register(&cmd_spi);
+    const esp_console_cmd_t c_spi = { .command="spi_test", .help="Init SPI bus to verify driver", .func=&cmd_spi_test };
+    esp_console_cmd_register(&c_spi);
 
     s_cmds_registered = true;
     ESP_LOGI(TAG, "CLI commands registered: logrb, loglvl, evstat, lpstat, uart_send, spi_test");

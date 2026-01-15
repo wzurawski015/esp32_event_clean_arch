@@ -1,15 +1,19 @@
 /**
  * @file idf_i2c_port.c
  * @brief Adapter "infrastructure" dla abstrakcyjnego ports::i2c_port,
- *        oparty o nowy sterownik ESP‑IDF (driver/i2c_master.h).
+ * oparty o nowy sterownik ESP‑IDF (driver/i2c_master.h).
  *
- *  - GPIO konfiguruje sterownik I2C,
- *  - Pull-up: flags.enable_internal_pullup z configu,
- *  - Każde urządzenie ma ustawioną prędkość SCL (Hz).
+ * - GPIO konfiguruje sterownik I2C,
+ * - Pull-up: flags.enable_internal_pullup z configu,
+ * - Każde urządzenie ma ustawioną prędkość SCL (Hz).
+ * - Zawiera mechanizm Bus Recovery (9 cykli zegara) przy starcie.
  */
 #include "idf_i2c_port.h"            // włącza również ports/i2c_port.h
 #include "driver/i2c_master.h"
+#include "driver/gpio.h"
 #include "esp_log.h"
+#include "esp_rom_sys.h"             // esp_rom_delay_us
+
 #include <stdlib.h>
 #include <string.h>
 
@@ -24,11 +28,75 @@ typedef struct i2c_dev {
 
 static const char* TAG = "I2C_PORT";
 
+/**
+ * @brief Procedura Bus Recovery (zgodna ze specyfikacją I2C).
+ *
+ * Jeśli Slave trzyma linię SDA w stanie niskim (np. po resetcie Mastera w trakcie transmisji),
+ * Master musi wygenerować do 9 cykli zegara na SCL, aby Slave dokończył nadawanie bitu
+ * i zwolnił SDA (pozwolił jej wrócić do stanu wysokiego). Na koniec generujemy STOP.
+ */
+static void i2c_recover_bus_(int sda_io, int scl_io)
+{
+    // 1. Konfiguracja pinów jako Open-Drain Output (bez podciągania wewn., liczymy na zewn.)
+    gpio_config_t io_conf = {
+        .pin_bit_mask = (1ULL << sda_io) | (1ULL << scl_io),
+        .mode = GPIO_MODE_INPUT_OUTPUT_OD, // Input, żeby czytać stan; Output OD, żeby sterować
+        .pull_up_en = GPIO_PULLUP_DISABLE,
+        .pull_down_en = GPIO_PULLDOWN_DISABLE,
+        .intr_type = GPIO_INTR_DISABLE
+    };
+    gpio_config(&io_conf);
+
+    // Jeśli SDA jest wysokie, magistrala jest wolna (lub idle).
+    if (gpio_get_level(sda_io) == 1) {
+        ESP_LOGD(TAG, "I2C bus recovery: SDA is high, skipping recovery");
+        // Przywróć stan domyślny (niezainicjalizowany), by sterownik I2C mógł przejąć piny
+        gpio_reset_pin(sda_io);
+        gpio_reset_pin(scl_io);
+        return;
+    }
+
+    ESP_LOGW(TAG, "I2C bus recovery: SDA is low! Attempting 9-clock cycle recovery...");
+
+    // 2. Generowanie do 9 cykli zegara
+    // Zegar ok. 100kHz -> T=10us -> delay 5us.
+    for (int i = 0; i < 9; i++) {
+        gpio_set_level(scl_io, 0);
+        esp_rom_delay_us(5);
+        gpio_set_level(scl_io, 1);
+        esp_rom_delay_us(5);
+
+        // Sprawdź czy Slave zwolnił SDA
+        if (gpio_get_level(sda_io) == 1) {
+            ESP_LOGW(TAG, "I2C bus recovery: SDA released after %d clocks", i + 1);
+            break;
+        }
+    }
+
+    // 3. Generowanie sekwencji STOP (SDA L->H gdy SCL H)
+    gpio_set_level(scl_io, 0);
+    gpio_set_level(sda_io, 0);
+    esp_rom_delay_us(5);
+
+    gpio_set_level(scl_io, 1);
+    esp_rom_delay_us(5);
+
+    gpio_set_level(sda_io, 1); // STOP condition
+    esp_rom_delay_us(5);
+
+    // 4. Sprzątanie
+    gpio_reset_pin(sda_io);
+    gpio_reset_pin(scl_io);
+}
+
 /* ---------- tworzenie/usuwanie magistrali ---------- */
 
 port_err_t i2c_bus_create(const i2c_bus_cfg_t* cfg, i2c_bus_t** out_bus)
 {
     if (!cfg || !out_bus) return PORT_ERR_INVALID_ARG;
+
+    // KROK 0: Próba odblokowania magistrali, jeśli jest "stuck"
+    i2c_recover_bus_(cfg->sda_gpio, cfg->scl_gpio);
 
     i2c_bus_t* bus = (i2c_bus_t*)calloc(1, sizeof(i2c_bus_t));
     if (!bus) return PORT_FAIL;

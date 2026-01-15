@@ -21,4 +21,5 @@ idf_component_register(
         core__ev        # event bus: evstat + API
         core__spsc_ring # STREAM: SPSC ring-buffer (claim/commit)
         core__leasepool  # lpstat
+        infrastructure__idf_spi_port  # Dodane dla testu SPI
 )

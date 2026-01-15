@@ -1,5 +1,5 @@
 idf_component_register(
-    SRCS "leasepool.c"
+    SRCS        "leasepool.c"
     INCLUDE_DIRS "include"
-    REQUIRES freertos
+    REQUIRES    freertos esp_rom
 )

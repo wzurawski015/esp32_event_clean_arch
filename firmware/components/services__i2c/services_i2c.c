@@ -20,6 +20,7 @@ typedef struct req_node
 
 static QueueHandle_t s_q  = NULL;
 static TaskHandle_t  s_th = NULL;
+static const ev_bus_t* s_bus = NULL;
 
 static void worker(void* arg)
 {
@@ -55,11 +56,11 @@ static void worker(void* arg)
         /* Event do systemu */
         if (err == ESP_OK)
         {
-            ev_post(EV_SRC_I2C, EV_I2C_DONE, (uintptr_t)n->r.user, (uintptr_t)0);
+            ev_bus_post(s_bus, EV_SRC_I2C, EV_I2C_DONE, (uintptr_t)n->r.user, (uintptr_t)0);
         }
         else
         {
-            ev_post(EV_SRC_I2C, EV_I2C_ERROR, (uintptr_t)n->r.user, (uintptr_t)err);
+            ev_bus_post(s_bus, EV_SRC_I2C, EV_I2C_ERROR, (uintptr_t)n->r.user, (uintptr_t)err);
             LOGW(TAG, "I2C op=%d failed: %d", (int)n->r.op, (int)err);
         }
 
@@ -72,10 +73,14 @@ static void worker(void* arg)
     }
 }
 
-bool services_i2c_start(int queue_len, int task_stack, int task_prio)
+bool services_i2c_start(const ev_bus_t* bus, int queue_len, int task_stack, int task_prio)
 {
     if (s_q)
         return true; /* już działa */
+    if (!bus || !bus->vtbl)
+        return false;
+    s_bus = bus;
+
     if (queue_len <= 0)
         queue_len = 16;
     s_q = xQueueCreate(queue_len, sizeof(req_node_t*));

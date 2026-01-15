@@ -1,10 +1,28 @@
-menu "Core: Lease Pool"
-config LP_NUM_SLOTS
-    int "Number of lease slots"
-    range 8 512
+menu "core__leasepool"
+
+config CORE_LEASEPOOL_SLOTS
+    int "Number of fixed lease slots"
+    range 4 256
     default 32
-config LP_BUF_SIZE
-    int "Payload size per slot (bytes)"
-    range 64 4096
-    default 256
+
+config CORE_LEASEPOOL_SLOT_BYTES
+    int "Bytes per lease slot"
+    range 16 1024
+    default 64
+
+config CORE_LEASEPOOL_GUARD
+    bool "Enable LeasePool guard (canary + poison + fail-fast asserts)"
+    default y
+    help
+        Adds canaries/poisoning and strict runtime validation to catch memory
+        corruption early (double free, use-after-free, buffer overflow).
+
+config CORE_LEASEPOOL_SELFTEST_ON_BOOT
+    bool "Run LeasePool selftest on boot"
+    default y
+    depends on CORE_LEASEPOOL_GUARD
+    help
+        Runs a lightweight consistency check during lp_init() and prints the
+        result using ROM printf. Useful for catching early corruption.
+
 endmenu

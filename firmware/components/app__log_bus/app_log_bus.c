@@ -1,9 +1,10 @@
 #include "app_log_bus.h"
 #include "core_ev.h"
-#include "core/leasepool.h"
+#include "infra_log_stream.h"
 #include "ports/log_port.h"
 #include "esp_log.h"
 #include <stdarg.h>
+#include <stdio.h>
 #include <string.h>
 
 static const char* TAG = "APP_LOG_BUS";
@@ -17,6 +18,8 @@ static portMUX_TYPE s_log_mux = portMUX_INITIALIZER_UNLOCKED;
 static char   s_acc[ACC_CAP];
 static size_t s_acc_len = 0;
 
+static const ev_bus_t* s_evb = NULL;
+
 static void logbus_flush_line_locked(void)
 {
     size_t len = s_acc_len;
@@ -27,24 +30,17 @@ static void logbus_flush_line_locked(void)
         len--;
     }
 
-    // Alokuj lease – jeśli linia > cap, wysyłamy ogon (ostatnie cap bajtów)
-    lp_handle_t h = lp_alloc_try((uint32_t)len);
-    if (h.idx != LP_INVALID_IDX) {
-        lp_view_t v;
-        if (lp_acquire(h, &v)) {
-            size_t copy_len = len;
-            const char* src = s_acc;
-            if (copy_len > v.cap) {
-                src      = s_acc + (copy_len - v.cap);
-                copy_len = v.cap;
-            }
-            memcpy(v.ptr, src, copy_len);
-            lp_commit(h, (uint32_t)copy_len);
-            // Zero-copy broadcast – bus podbije refy i zwolni ref producenta
-            ev_post_lease(EV_SRC_LOG, EV_LOG_NEW, h, (uint16_t)copy_len);
-        } else {
-            // Na wszelki wypadek – usprawnienie bezpieczeństwa
-            lp_release(h);
+    // STREAM: zapis do SPSC ring-buffer (bez alokacji) + lekka notyfikacja READY.
+    // Jeżeli bufor jest pełny, dropujemy linię – kolejny READY i tak pozwoli konsumentowi nadrobić.
+    const size_t free = infra_log_stream_capacity() - infra_log_stream_used();
+    if (free >= (len + 1u)) {
+        bool ok = infra_log_stream_write_all(s_acc, len);
+        if (ok) {
+            const char nl = '\n';
+            ok = infra_log_stream_write_all(&nl, 1u);
+        }
+        if (ok) {
+            (void)ev_bus_post(s_evb, EV_SRC_LOG, EV_LOG_READY, 0, 0);
         }
     }
     s_acc_len = 0;
@@ -93,10 +89,14 @@ static int logbus_vprintf(const char* fmt, va_list ap)
     return ret;
 }
 
-bool app_log_bus_start(void)
+bool app_log_bus_start(const ev_bus_t* bus)
 {
+    if (!bus || !bus->vtbl)
+        return false;
+    s_evb = bus;
+    infra_log_stream_init();
     // Wrapujemy aktualny vprintf
     s_prev_vprintf = esp_log_set_vprintf(logbus_vprintf);
-    LOGI(TAG, "Log-bus ready: vprintf wrapped -> EV_LOG_NEW (LEASE, zero-copy).");
+    LOGI(TAG, "Log-bus ready: vprintf wrapped -> EV_LOG_READY (STREAM, SPSC ring, newline-delimited).");
     return true;
 }

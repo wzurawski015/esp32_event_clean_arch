@@ -7,7 +7,7 @@
 #include "services_timer.h"
 #include "services_i2c.h"
 
-#include "app_log_bus.h"     // log -> EV (lease)
+#include "app_log_bus.h"     // log -> EV (STREAM/READY)
 #include "app_demo_lcd.h"    // aktor LCD
 
 #if CONFIG_INFRA_LOG_CLI
@@ -32,15 +32,17 @@ void app_main(void)
     ev_init();
     lp_init();
 
-    // 2) Serwisy systemowe
-    services_timer_start();
-    services_i2c_start(16, 4096, 8);
+    const ev_bus_t* bus = ev_bus_default();
 
-    // 3) Most log->EV (lease): każda nowa linia logu = EV_LOG_NEW z uchwytem
-    app_log_bus_start();
+    // 2) Serwisy systemowe
+    services_timer_start(bus);
+    services_i2c_start(bus, 16, 4096, 8);
+
+    // 3) Most log->EV (STREAM): każda nowa linia logu = EV_LOG_READY, payload w ringu
+    app_log_bus_start(bus);
 
     // 4) Aplikacja jako aktor (LCD, w razie potrzeby inne)
-    app_demo_lcd_start();
+    app_demo_lcd_start(bus);
 
     // 5) CLI (opcjonalnie)
 #if CONFIG_INFRA_LOG_CLI

@@ -1,77 +1,88 @@
 #pragma once
-#include <stdbool.h>
 #include <stdint.h>
+#include <stdbool.h>
 
-#ifdef __cplusplus
-extern "C" {
-#endif
+/**
+ * @file leasepool.h
+ * @brief Ultra‑lekki LeasePool (stałe sloty, ref‑count + generacje) dla payloadów LEASE.
+ *
+ * Założenia:
+ *  - brak malloc/free w ścieżce krytycznej
+ *  - stała liczba slotów o stałej pojemności (cap)
+ *  - ref-count: slot zwalniany dopiero gdy refcnt spadnie do 0
+ *  - generacja (gen) chroni przed użyciem starego uchwytu (stale handle)
+ *
+ * Uwaga: producent zazwyczaj:
+ *  1) lp_alloc_try(want_len)
+ *  2) lp_acquire() -> zapis do bufora
+ *  3) lp_commit(len)
+ *  4) publish: ev_post_lease(...)
+ *
+ * Konsument:
+ *  1) lp_acquire() -> odczyt
+ *  2) lp_release()
+ */
 
 typedef struct {
-    uint16_t idx;   // index w tablicy slotów
-    uint16_t gen;   // generacja (anti-ABA)
+    uint16_t idx;  /* 0..N-1 */
+    uint16_t gen;  /* generacja slotu */
 } lp_handle_t;
 
 typedef struct {
-    void*    ptr;   // adres danych
-    uint32_t cap;   // pojemność bufora (LP_BUF_SIZE)
-    uint32_t len;   // logiczna długość danych
+    void*    ptr;
+    uint32_t len;
+    uint32_t cap; /* stałe: LP_BUF_SIZE */
 } lp_view_t;
 
-// Inicjalizacja puli
-bool lp_init(void);
-
-// Alokacja pustego bufora (nie blokuje). Jeśli want_len > cap, zwróci invalid.
-lp_handle_t lp_alloc_try(uint32_t want_len);
-
-// Ustaw finalną długość payloadu (publikacja danych)
-bool lp_commit(lp_handle_t h, uint32_t len);
-
-// Dostęp do danych (waliduje idx+gen)
-bool lp_acquire(lp_handle_t h, lp_view_t* out);
-
-// Zwiększ licznik referencji o n (robi to szyna zdarzeń przy fan-out)
-bool lp_addref_n(lp_handle_t h, uint16_t n);
-
-// Zmniejsz ref; gdy spadnie do 0 — slot wraca do puli (gen++)
-void lp_release(lp_handle_t h);
-
-// Warianty ISR-safe (krótkie sekcje krytyczne)
-lp_handle_t lp_alloc_try_isr(uint32_t want_len);
-bool        lp_commit_isr(lp_handle_t h, uint32_t len);
-bool        lp_addref_n_isr(lp_handle_t h, uint16_t n);
-void        lp_release_isr(lp_handle_t h);
-
-// Metryki (na potrzeby CLI/diag)
 typedef struct {
     uint16_t slots_total;
     uint16_t slots_free;
+    uint16_t slots_used;
+    uint16_t slots_peak_used;
+
+    uint32_t alloc_ok;
     uint32_t drops_alloc_fail;
+
+    /* Licznik naruszeń guardów (canary/poison/assert), jeśli włączone. */
+    uint32_t guard_failures;
 } lp_stats_t;
 
-void lp_get_stats(lp_stats_t* s);
+void      lp_init(void);
 
-// Stała do sprawdzania poprawności uchwytu
-#define LP_INVALID_IDX ((uint16_t)0xFFFF)
+lp_handle_t lp_alloc_try(uint32_t want_len);
+bool      lp_acquire(lp_handle_t h, lp_view_t* out);
+void      lp_commit(lp_handle_t h, uint32_t len);
 
-// -----------------------------------------------------------------------------
-// Helpery: pack/unpack uchwytu do/u 32-bit (np. w polach eventu)
-// -----------------------------------------------------------------------------
+void      lp_addref_n(lp_handle_t h, uint16_t n);
+void      lp_release(lp_handle_t h);
+
+uint16_t  lp_free_count(void);
+uint16_t  lp_used_count(void);
+void      lp_get_stats(lp_stats_t* out);
+void      lp_reset_stats(void);
+
+/**
+ * @brief Sprawdza integralność LeasePool (invariants, free‑list, canary/poison).
+ *
+ * @param verbose Jeśli true, wypisuje raport na stdout/ROM (w zależności od platformy).
+ * @return liczba wykrytych problemów (0 == OK)
+ */
+int       lp_check(bool verbose);
+
+/**
+ * @brief Wypisuje tabelę slotów i free‑list (diagnostyka).
+ */
+void      lp_dump(void);
+
+static inline lp_handle_t lp_invalid_handle(void) { return (lp_handle_t){ .idx = 0xFFFFu, .gen = 0u }; }
+static inline bool        lp_handle_is_valid(lp_handle_t h) { return (h.idx != 0xFFFFu); }
+
 static inline uint32_t lp_pack_handle_u32(lp_handle_t h)
 {
-    return ((uint32_t)h.idx << 16) | (uint32_t)h.gen;
+    return ((uint32_t)h.idx & 0xFFFFu) | (((uint32_t)h.gen & 0xFFFFu) << 16);
 }
 
-static inline lp_handle_t lp_unpack_handle_u32(uint32_t w)
+static inline lp_handle_t lp_unpack_handle_u32(uint32_t v)
 {
-    lp_handle_t h;
-    h.idx = (uint16_t)(w >> 16);
-    h.gen = (uint16_t)(w & 0xFFFFu);
-    return h;
+    return (lp_handle_t){ .idx = (uint16_t)(v & 0xFFFFu), .gen = (uint16_t)((v >> 16) & 0xFFFFu) };
 }
-
-// Alias zgodny z wcześniejszym użyciem:
-#define lp_unpack_u32 lp_unpack_handle_u32
-
-#ifdef __cplusplus
-}
-#endif

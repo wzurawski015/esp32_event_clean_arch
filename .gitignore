@@ -93,6 +93,7 @@ docs/_build/
 *.gcov
 gmon.out
 core
+!**/core/
 vgcore.*
 
 # --- Logi / archiwa --------------------------------------------------

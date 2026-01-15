@@ -1,7 +1,6 @@
 #pragma once
 
 // PR2: Event schema (single source of truth) jako X-macro.
-// UWAGA: Nie includuj tego pliku bezposrednio.
 
 #define EV_SCHEMA(X) \
     /* SYS */ \
@@ -28,6 +27,7 @@
     /* DS18B20 */ \
     X(EV_DS18_READY,       EV_SRC_DS18,  0x4000, LEASE, DROP_NEW,     0,           "DS18 ready (lease payload: ds18_result_t)") \
     X(EV_DS18_ERROR,       EV_SRC_DS18,  0x4001, COPY,  DROP_NEW,     EVF_CRITICAL, "DS18 error (a0=err)") \
+    X(EV_DS18_DRV_TICK,    EV_SRC_DS18,  0x4002, NONE,  DROP_NEW,     0,           "DS18 internal driver tick") \
     \
     /* LOG */ \
     X(EV_LOG_NEW,          EV_SRC_LOG,   0x5000, LEASE, DROP_NEW,     EVF_CRITICAL, "log line (lease payload)") \

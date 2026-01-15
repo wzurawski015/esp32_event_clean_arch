@@ -61,7 +61,8 @@ static void process_sm(void);
 static void timer_once_cb(void* arg)
 {
     (void)arg;
-    ev_bus_post(s_bus, EV_SRC_DS18, EV_DS18_READY, 0, 0);
+    /* FIX: Używamy wewnętrznego ticka (NONE), a nie READY (LEASE) */
+    ev_bus_post(s_bus, EV_SRC_DS18, EV_DS18_DRV_TICK, 0, 0);
 }
 static void timer_period_cb(void* arg)
 {
@@ -69,7 +70,8 @@ static void timer_period_cb(void* arg)
     if (s_st == S_IDLE)
     {
         s_st = S_KICK_CONVERT;
-        ev_bus_post(s_bus, EV_SRC_DS18, EV_DS18_READY, 0, 0);
+        /* FIX: Używamy wewnętrznego ticka (NONE) */
+        ev_bus_post(s_bus, EV_SRC_DS18, EV_DS18_DRV_TICK, 0, 0);
     }
 }
 
@@ -152,6 +154,8 @@ static void process_sm(void)
                     r->rom_code = 0; // SKIP_ROM used
                     r->temp_c = temp_c;
                     lp_commit(h, sizeof(ds18_result_t));
+                    
+                    /* FIX: Tutaj (i tylko tutaj) wysyłamy LEASE */
                     ev_bus_post_lease(s_bus, EV_SRC_DS18, EV_DS18_READY, h, sizeof(ds18_result_t));
                 }
             }
@@ -177,7 +181,8 @@ static void ds18_task(void* arg)
     {
         if (xQueueReceive(s_q, &m, portMAX_DELAY) == pdTRUE)
         {
-            if (m.src == EV_SRC_DS18 && m.code == EV_DS18_READY)
+            /* FIX: Reagujemy na wewnętrzny tick, a nie na READY */
+            if (m.src == EV_SRC_DS18 && m.code == EV_DS18_DRV_TICK)
             {
                 if (s_st == S_WAIT_CONVERT)
                 {
@@ -208,7 +213,6 @@ bool services_ds18_start(const ev_bus_t* bus, const ds18_svc_cfg_t* cfg)
     s_res_bits  = cfg->resolution_bits;
     s_period_ms = cfg->period_ms;
 
-    // Init Hardware Port
     if (onewire_bus_create(cfg->gpio, &s_ow) != PORT_OK) return false;
 
     if (!ev_bus_subscribe(s_bus, &s_q, 8)) return false;

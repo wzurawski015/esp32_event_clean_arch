@@ -45,7 +45,7 @@ typedef struct
 } svc_timer_fire_t;
 
 static svc_timer_slot_t s_slots[CONFIG_SERVICES_TIMER_MAX_SLOTS];
-static timer_handle_t s_timer = NULL;
+static timer_port_t* s_timer = NULL; /* FIX: Poprawny typ (zamiast timer_handle_t) */
 static SemaphoreHandle_t s_mu = NULL;
 
 static bool s_started = false;
@@ -218,7 +218,13 @@ bool services_timer_start(void)
     s_due_us  = 0;
     s_started = false;
 
-    const port_err_t err = timer_create(&s_timer, timer_cb_, NULL);
+    /* FIX: Użycie poprawnej struktury timer_cfg_t */
+    timer_cfg_t cfg = {
+        .cb = timer_cb_,
+        .user = NULL
+    };
+    const port_err_t err = timer_create(&cfg, &s_timer);
+
     if (err != ESP_OK)
     {
         ESP_LOGE(TAG, "timer_create failed: %d", (int)err);
@@ -412,3 +418,4 @@ bool services_timer_is_active(services_timer_token_t tok)
 
     return ok;
 }
+

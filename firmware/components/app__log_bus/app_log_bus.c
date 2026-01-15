@@ -18,6 +18,8 @@ static portMUX_TYPE s_log_mux = portMUX_INITIALIZER_UNLOCKED;
 static char   s_acc[ACC_CAP];
 static size_t s_acc_len = 0;
 
+static const ev_bus_t* s_evb = NULL;
+
 static void logbus_flush_line_locked(void)
 {
     size_t len = s_acc_len;
@@ -38,7 +40,7 @@ static void logbus_flush_line_locked(void)
             ok = infra_log_stream_write_all(&nl, 1u);
         }
         if (ok) {
-            (void)ev_post(EV_SRC_LOG, EV_LOG_READY, 0, 0);
+            (void)ev_bus_post(s_evb, EV_SRC_LOG, EV_LOG_READY, 0, 0);
         }
     }
     s_acc_len = 0;
@@ -87,8 +89,11 @@ static int logbus_vprintf(const char* fmt, va_list ap)
     return ret;
 }
 
-bool app_log_bus_start(void)
+bool app_log_bus_start(const ev_bus_t* bus)
 {
+    if (!bus || !bus->vtbl)
+        return false;
+    s_evb = bus;
     infra_log_stream_init();
     // Wrapujemy aktualny vprintf
     s_prev_vprintf = esp_log_set_vprintf(logbus_vprintf);

@@ -10,6 +10,8 @@
  */
 #pragma once
 #include <stdbool.h>
+
+#include "core_ev.h"
 #include <stdint.h>
 
 #ifdef __cplusplus
@@ -26,7 +28,7 @@ extern "C"
     } ds18_svc_cfg_t;
 
     /** Start serwisu. Zwraca true jeżeli udało się wystartować. */
-    bool services_ds18_start(const ds18_svc_cfg_t* cfg);
+    bool services_ds18_start(const ev_bus_t* bus, const ds18_svc_cfg_t* cfg);
 
     /** Stop serwisu (opcjonalny). */
     void services_ds18_stop(void);

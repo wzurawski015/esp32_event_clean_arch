@@ -24,6 +24,8 @@ static i2c_dev_t*   s_dev_lcd = NULL;
 static i2c_dev_t*   s_dev_rgb = NULL;
 static TaskHandle_t s_task    = NULL;
 
+static const ev_bus_t* s_evb = NULL;
+
 static void scan_log_and_pick_addrs(i2c_bus_t* bus, uint8_t* out_lcd, uint8_t* out_rgb)
 {
     bool got_lcd = false, got_rgb = false;
@@ -107,10 +109,14 @@ static void app_demo_lcd_task(void* arg)
 {
     (void)arg;
     ev_queue_t q;
-    ev_subscribe(&q, 16);
+    if (!ev_bus_subscribe(s_evb, &q, 16)) {
+        LOGE(TAG, "EV subscribe failed");
+        vTaskDelete(NULL);
+        return;
+    }
 
     // Kick start
-    ev_post(EV_SRC_SYS, EV_SYS_START, 0, 0);
+    ev_bus_post(s_evb, EV_SRC_SYS, EV_SYS_START, 0, 0);
 
     bool first_ready = false;
     ev_msg_t m;
@@ -153,8 +159,13 @@ static void app_demo_lcd_task(void* arg)
     }
 }
 
-bool app_demo_lcd_start(void)
+bool app_demo_lcd_start(const ev_bus_t* bus)
 {
+    if (!bus || !bus->vtbl) {
+        return false;
+    }
+    s_evb = bus;
+
     // Magistrala I²C
     i2c_bus_cfg_t buscfg = {
         .sda_gpio               = CONFIG_APP_I2C_SDA,

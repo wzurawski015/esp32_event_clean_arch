@@ -32,15 +32,17 @@ void app_main(void)
     ev_init();
     lp_init();
 
+    const ev_bus_t* bus = ev_bus_default();
+
     // 2) Serwisy systemowe
-    services_timer_start();
-    services_i2c_start(16, 4096, 8);
+    services_timer_start(bus);
+    services_i2c_start(bus, 16, 4096, 8);
 
     // 3) Most log->EV (STREAM): każda nowa linia logu = EV_LOG_READY, payload w ringu
-    app_log_bus_start();
+    app_log_bus_start(bus);
 
     // 4) Aplikacja jako aktor (LCD, w razie potrzeby inne)
-    app_demo_lcd_start();
+    app_demo_lcd_start(bus);
 
     // 5) CLI (opcjonalnie)
 #if CONFIG_INFRA_LOG_CLI

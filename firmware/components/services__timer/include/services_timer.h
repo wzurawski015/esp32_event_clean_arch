@@ -1,9 +1,9 @@
 /**
  * @file services_timer.h
- * @brief Serwis timerów deadline-driven (one-shot / periodic) emitujący zdarzenia na EV-bus.
+ * @brief Serwis timerów deadline-driven (one-shot / periodic) emitujący zdarzenia na EV-bus (wstrzykiwany ev_bus_t).
  *
  * Zamiast globalnych "ticków" (spam), serwis trzyma listę aktywnych deadline'ów i uzbraja
- * tylko najbliższy. Po wygaśnięciu publikuje wskazane zdarzenie (ev_post).
+ * tylko najbliższy. Po wygaśnięciu publikuje wskazane zdarzenie (ev_bus_post).
  *
  * Funkcje API są przeznaczone do użycia w kontekście taska (nie ISR).
  */
@@ -31,7 +31,7 @@ typedef uint32_t services_timer_token_t;
  *
  * @return true jeśli serwis działa (lub już działał).
  */
-bool services_timer_start(void);
+bool services_timer_start(const ev_bus_t* bus);
 
 /**
  * Zatrzymuje serwis timerów i usuwa wszystkie aktywne deadline'y.

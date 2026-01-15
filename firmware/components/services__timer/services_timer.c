@@ -49,6 +49,7 @@ static timer_port_t* s_timer = NULL; /* FIX: Poprawny typ (zamiast timer_handle_
 static SemaphoreHandle_t s_mu = NULL;
 
 static bool s_started = false;
+static const ev_bus_t* s_bus = NULL;
 static bool s_armed   = false;
 static uint64_t s_due_us = 0;
 
@@ -197,14 +198,22 @@ static void timer_cb_(void* arg)
     // Post outside the mutex.
     for (unsigned i = 0; i < n_fires; i++)
     {
-        ev_post(fires[i].src, fires[i].code, fires[i].a0, fires[i].a1);
+        ev_bus_post(s_bus, fires[i].src, fires[i].code, fires[i].a0, fires[i].a1);
     }
 }
 
-bool services_timer_start(void)
+bool services_timer_start(const ev_bus_t* bus)
 {
     if (s_started)
         return true;
+
+    if (!bus || !bus->vtbl || !bus->vtbl->post || !bus->vtbl->subscribe)
+    {
+        ESP_LOGE(TAG, "ev_bus is NULL/invalid");
+        return false;
+    }
+
+    s_bus = bus;
 
     s_mu = xSemaphoreCreateMutex();
     if (!s_mu)

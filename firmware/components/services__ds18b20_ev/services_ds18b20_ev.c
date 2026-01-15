@@ -140,6 +140,7 @@ static int ms_for_res(int bits)
 
 /* event queue (subskrypcja core__ev) */
 static ev_queue_t s_q;
+static const ev_bus_t* s_bus = NULL;
 
 /* forward */
 static void ds18_task(void* arg);
@@ -149,7 +150,7 @@ static void timer_once_cb(void* arg)
 {
     (void)arg;
     /* sygnał wewnętrzny – używamy EV_DS18_READY jako "TIMER_DONE" */
-    ev_post(EV_SRC_DS18, EV_DS18_READY, 0, 0);
+    ev_bus_post(s_bus, EV_SRC_DS18, EV_DS18_READY, 0, 0);
 }
 static void timer_period_cb(void* arg)
 {
@@ -157,7 +158,7 @@ static void timer_period_cb(void* arg)
     if (s_st == S_IDLE)
     {
         s_st = S_KICK_CONVERT;
-        ev_post(EV_SRC_DS18, EV_DS18_READY, 0, 0); /* „tick” do przetworzenia */
+        ev_bus_post(s_bus, EV_SRC_DS18, EV_DS18_READY, 0, 0); /* „tick” do przetworzenia */
     }
 }
 
@@ -210,7 +211,7 @@ static void process_sm(void)
             }
             else
             {
-                ev_post(EV_SRC_DS18, EV_DS18_ERROR, 1, 0);
+                ev_bus_post(s_bus, EV_SRC_DS18, EV_DS18_ERROR, 1, 0);
                 s_st = S_IDLE;
             }
             break;
@@ -226,11 +227,11 @@ static void process_sm(void)
             {
                 /* 12-bit: 1 LSB = 0.0625°C, milli‑C: *62.5 => *625/10 */
                 int milliC = (int)((raw * 625) / 10);
-                ev_post(EV_SRC_DS18, EV_DS18_READY, (uintptr_t)milliC, 0);
+                ev_bus_post(s_bus, EV_SRC_DS18, EV_DS18_READY, (uintptr_t)milliC, 0);
             }
             else
             {
-                ev_post(EV_SRC_DS18, EV_DS18_ERROR, 2, 0);
+                ev_bus_post(s_bus, EV_SRC_DS18, EV_DS18_ERROR, 2, 0);
             }
             s_st = S_IDLE;
         }
@@ -274,10 +275,14 @@ static void ds18_task(void* arg)
 }
 
 /* API serwisu */
-bool services_ds18_start(const ds18_svc_cfg_t* cfg)
+bool services_ds18_start(const ev_bus_t* bus, const ds18_svc_cfg_t* cfg)
 {
     if (!cfg)
         return false;
+
+    if (!bus || !bus->vtbl)
+        return false;
+    s_bus = bus;
     s_gpio      = cfg->gpio;
     s_res_bits  = cfg->resolution_bits;
     s_period_ms = cfg->period_ms;
@@ -291,7 +296,7 @@ bool services_ds18_start(const ds18_svc_cfg_t* cfg)
     gpio_config(&io);
     line_release();
 
-    if (!ev_subscribe(&s_q, 8))
+    if (!ev_bus_subscribe(s_bus, &s_q, 8))
         return false;
 
     /* periodic timer (odpala cały cykl pomiaru) */

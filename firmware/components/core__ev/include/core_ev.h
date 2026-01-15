@@ -104,6 +104,60 @@ bool ev_post(ev_src_t src, uint16_t code, uint32_t a0, uint32_t a1);
 bool ev_post_lease(ev_src_t src, uint16_t code, lp_handle_t h, uint16_t len);
 bool ev_post_from_isr(ev_src_t src, uint16_t code, uint32_t a0, uint32_t a1);
 
+/* =========================
+ * PR7: EventBus jako port (vtbl) — dependency injection
+ *
+ * Serwisy/aktory NIE muszą wołać globalnych ev_post*().
+ * Zamiast tego dostają wskaźnik do ev_bus_t (implementacja + self),
+ * co umożliwia w testach podstawienie fake-busa.
+ */
+
+typedef struct ev_bus_vtbl {
+    bool (*post)(void* self, ev_src_t src, uint16_t code, uint32_t a0, uint32_t a1);
+    bool (*post_lease)(void* self, ev_src_t src, uint16_t code, lp_handle_t h, uint16_t len);
+    bool (*post_from_isr)(void* self, ev_src_t src, uint16_t code, uint32_t a0, uint32_t a1);
+    bool (*subscribe)(void* self, ev_queue_t* out_q, size_t depth);
+    bool (*unsubscribe)(void* self, ev_queue_t q);
+} ev_bus_vtbl_t;
+
+typedef struct ev_bus {
+    void* self;
+    const ev_bus_vtbl_t* vtbl;
+} ev_bus_t;
+
+/**
+ * @brief Domyślna instancja busa (singleton core__ev).
+ *
+ * Uwaga: sam obiekt busa można pobrać zawsze, ale przed użyciem należy wywołać
+ * ev_init() (inicjalizacja rdzenia event-busa).
+ */
+const ev_bus_t* ev_bus_default(void);
+
+static inline bool ev_bus_post(const ev_bus_t* bus, ev_src_t src, uint16_t code, uint32_t a0, uint32_t a1)
+{
+    return (bus && bus->vtbl && bus->vtbl->post) ? bus->vtbl->post(bus->self, src, code, a0, a1) : false;
+}
+
+static inline bool ev_bus_post_lease(const ev_bus_t* bus, ev_src_t src, uint16_t code, lp_handle_t h, uint16_t len)
+{
+    return (bus && bus->vtbl && bus->vtbl->post_lease) ? bus->vtbl->post_lease(bus->self, src, code, h, len) : false;
+}
+
+static inline bool ev_bus_post_from_isr(const ev_bus_t* bus, ev_src_t src, uint16_t code, uint32_t a0, uint32_t a1)
+{
+    return (bus && bus->vtbl && bus->vtbl->post_from_isr) ? bus->vtbl->post_from_isr(bus->self, src, code, a0, a1) : false;
+}
+
+static inline bool ev_bus_subscribe(const ev_bus_t* bus, ev_queue_t* out_q, size_t depth)
+{
+    return (bus && bus->vtbl && bus->vtbl->subscribe) ? bus->vtbl->subscribe(bus->self, out_q, depth) : false;
+}
+
+static inline bool ev_bus_unsubscribe(const ev_bus_t* bus, ev_queue_t q)
+{
+    return (bus && bus->vtbl && bus->vtbl->unsubscribe) ? bus->vtbl->unsubscribe(bus->self, q) : false;
+}
+
 /* Statystyki globalne busa */
 typedef struct {
     uint16_t subs_active; /* FIX: Zmiana nazwy z 'subs' na 'subs_active' dla czytelności w CLI */

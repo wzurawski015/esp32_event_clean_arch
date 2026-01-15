@@ -576,3 +576,58 @@ size_t ev_get_event_stats(ev_event_stats_t* out, size_t max)
 const char* ev_kind_str(ev_kind_t kind) { return ev_kind_str_(kind); }
 const char* ev_qos_str(ev_qos_t qos)    { return ev_qos_str_(qos); }
 
+
+/* =========================
+ * PR7: EventBus jako port (vtbl) — default implementation (singleton)
+ *
+ * Uwaga: obecnie core__ev jest single-busem (globalny stan). self nie jest używane,
+ * ale zostawiamy je w interfejsie, żeby w przyszłości łatwo przejść na wiele instancji.
+ * ========================= */
+
+static bool bus_post_(void* self, ev_src_t src, uint16_t code, uint32_t a0, uint32_t a1)
+{
+    (void)self;
+    return ev_post(src, code, a0, a1);
+}
+
+static bool bus_post_lease_(void* self, ev_src_t src, uint16_t code, lp_handle_t h, uint16_t len)
+{
+    (void)self;
+    return ev_post_lease(src, code, h, len);
+}
+
+static bool bus_post_from_isr_(void* self, ev_src_t src, uint16_t code, uint32_t a0, uint32_t a1)
+{
+    (void)self;
+    return ev_post_from_isr(src, code, a0, a1);
+}
+
+static bool bus_subscribe_(void* self, ev_queue_t* out_q, size_t depth)
+{
+    (void)self;
+    return ev_subscribe(out_q, depth);
+}
+
+static bool bus_unsubscribe_(void* self, ev_queue_t q)
+{
+    (void)self;
+    return ev_unsubscribe(q);
+}
+
+static const ev_bus_vtbl_t s_bus_vtbl = {
+    .post         = bus_post_,
+    .post_lease   = bus_post_lease_,
+    .post_from_isr= bus_post_from_isr_,
+    .subscribe    = bus_subscribe_,
+    .unsubscribe  = bus_unsubscribe_,
+};
+
+static const ev_bus_t s_bus = {
+    .self = NULL,
+    .vtbl = &s_bus_vtbl,
+};
+
+const ev_bus_t* ev_bus_default(void)
+{
+    return &s_bus;
+}

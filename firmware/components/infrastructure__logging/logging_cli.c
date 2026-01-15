@@ -253,7 +253,7 @@ static const char* ev_api_hint_(ev_kind_t kind, ev_qos_t qos)
                        ? "COPY (REPLACE_LAST) -> ev_post(src, code, a0, a1) + sub depth=1"
                        : "COPY  -> ev_post(src, code, a0, a1)";
         case EVK_LEASE:  return "LEASE -> ev_post_lease(src, code, h, len)";
-        case EVK_STREAM: return "STREAM -> (PR6: SPSC ring + *_READY)";
+        case EVK_STREAM: return "STREAM -> ev_post(src, code, 0,0) + drain SPSC ring (peek/consume)";
         default:         return "?";
     }
 }
@@ -709,7 +709,7 @@ static int cmd_evstat_check(int argc, char** argv)
             issues++;
         }
 
-        if (e->qos == EVQ_REPLACE_LAST && !(e->kind == EVK_NONE || e->kind == EVK_COPY)) {
+        if (e->qos == EVQ_REPLACE_LAST && !(e->kind == EVK_NONE || e->kind == EVK_COPY || e->kind == EVK_STREAM)) {
             printf("FAIL invalid qos/kind combo: idx=%u name=%s kind=%s qos=%s\n",
                    i,
                    e->name ? e->name : "?",

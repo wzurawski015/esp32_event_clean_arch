@@ -1,7 +1,7 @@
 #include "app_demo_lcd.h"
 
 #include "core_ev.h"
-#include "core/leasepool.h"
+#include "infra_log_stream.h"
 #include "ports/log_port.h"
 
 #include "idf_i2c_port.h"                 // i2c_bus_create/probe/add
@@ -58,6 +58,51 @@ static void lcd_print_line16(uint8_t row, const char* s, size_t len)
     lcd1602rgb_draw_text(0, row, tmp);
 }
 
+static inline void tail16_push_(char* buf, size_t* len_io, char c)
+{
+    if (*len_io < 16) {
+        buf[*len_io] = c;
+        (*len_io)++;
+        return;
+    }
+
+    // okno przesuwne: utrzymuj ostatnie 16 znaków
+    memmove(buf, buf + 1, 15);
+    buf[15] = c;
+}
+
+static void drain_log_stream_to_lcd_(void)
+{
+    // Stan przenoszony pomiędzy wywołaniami: linia może być pocięta na fragmenty
+    static char   tail[16];
+    static size_t tail_len = 0;
+
+    for (;;) {
+        size_t n = 0;
+        const uint8_t* p = infra_log_stream_peek(&n);
+        if (!p || n == 0) break;
+
+        for (size_t i = 0; i < n; ++i) {
+            const char c = (char)p[i];
+            if (c == '\n') {
+                // Wyświetl ogon (ostatnie 16 znaków) tak jak w trybie EV_LOG_NEW
+                char tmp[17];
+                memcpy(tmp, tail, tail_len);
+                tmp[tail_len] = '\0';
+                lcd_print_line16(1, tmp, tail_len);
+                lcd1602rgb_request_flush();
+                tail_len = 0;
+                continue;
+            }
+
+            if (c == '\r') continue;
+            tail16_push_(tail, &tail_len, c);
+        }
+
+        infra_log_stream_consume(n);
+    }
+}
+
 static void app_demo_lcd_task(void* arg)
 {
     (void)arg;
@@ -84,7 +129,13 @@ static void app_demo_lcd_task(void* arg)
             continue;
         }
 
-        // 2) Reaktywne logi: pokaż ogon linii (ostatnie 16 znaków) w dolnym wierszu
+        // 2) Reaktywne logi (STREAM): EV_LOG_READY -> payload w ring-bufferze
+        if (m.src == EV_SRC_LOG && m.code == EV_LOG_READY) {
+            drain_log_stream_to_lcd_();
+            continue;
+        }
+
+        // 2b) Legacy: EV_LOG_NEW (LEASE) – zachowane dla kompatybilności
         if (m.src == EV_SRC_LOG && m.code == EV_LOG_NEW) {
             lp_handle_t h = lp_unpack_handle_u32(m.a0);
             lp_view_t   v;

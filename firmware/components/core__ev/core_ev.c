@@ -167,11 +167,17 @@ static void ev_schema_require_kind_2_(const char* api, ev_src_t src, uint16_t co
     if (!(meta->kind == k0 || meta->kind == k1)) ev_schema_abort_(api, src, code, meta, "wrong API for event kind");
 }
 
+static void ev_schema_require_kind_3_(const char* api, ev_src_t src, uint16_t code, const ev_meta_t* meta, ev_kind_t k0, ev_kind_t k1, ev_kind_t k2)
+{
+    if (!meta) ev_schema_abort_(api, src, code, NULL, "internal: meta==NULL");
+    if (!(meta->kind == k0 || meta->kind == k1 || meta->kind == k2)) ev_schema_abort_(api, src, code, meta, "wrong API for event kind");
+}
+
 static void ev_schema_require_none_payload_(const char* api, ev_src_t src, uint16_t code, const ev_meta_t* meta, uint32_t a0, uint32_t a1)
 {
     if (!meta) ev_schema_abort_(api, src, code, NULL, "internal: meta==NULL");
-    if (meta->kind == EVK_NONE && (a0 != 0u || a1 != 0u)) {
-        ev_schema_abort_(api, src, code, meta, "EVK_NONE requires a0=a1=0");
+    if ((meta->kind == EVK_NONE || meta->kind == EVK_STREAM) && (a0 != 0u || a1 != 0u)) {
+        ev_schema_abort_(api, src, code, meta, "EVK_NONE/STREAM requires a0=a1=0");
     }
 }
 
@@ -384,7 +390,7 @@ bool ev_post(ev_src_t src, uint16_t code, uint32_t a0, uint32_t a1)
     const ev_meta_t* meta = NULL;
 #if defined(CONFIG_CORE_EV_SCHEMA_GUARD) && CONFIG_CORE_EV_SCHEMA_GUARD
     meta = ev_schema_require_known_("ev_post", src, code);
-    ev_schema_require_kind_2_("ev_post", src, code, meta, EVK_NONE, EVK_COPY);
+    ev_schema_require_kind_3_("ev_post", src, code, meta, EVK_NONE, EVK_COPY, EVK_STREAM);
     ev_schema_require_none_payload_("ev_post", src, code, meta, a0, a1);
 #else
     meta = ev_meta_find(src, code);
@@ -462,7 +468,7 @@ bool ev_post_from_isr(ev_src_t src, uint16_t code, uint32_t a0, uint32_t a1)
 {
 #if defined(CONFIG_CORE_EV_SCHEMA_GUARD) && CONFIG_CORE_EV_SCHEMA_GUARD
     const ev_meta_t* meta = ev_schema_require_known_("ev_post_from_isr", src, code);
-    ev_schema_require_kind_2_("ev_post_from_isr", src, code, meta, EVK_NONE, EVK_COPY);
+    ev_schema_require_kind_3_("ev_post_from_isr", src, code, meta, EVK_NONE, EVK_COPY, EVK_STREAM);
     ev_schema_require_none_payload_("ev_post_from_isr", src, code, meta, a0, a1);
 #else
     const ev_meta_t* meta = ev_meta_find(src, code);

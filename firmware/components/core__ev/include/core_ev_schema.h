@@ -41,4 +41,5 @@
     X(EV_DS18_ERROR,       EV_SRC_DS18,  0x4001, COPY,  DROP_NEW,     EVF_CRITICAL, "DS18 error (a0=err)") \
     \
     /* LOG */ \
-    X(EV_LOG_NEW,          EV_SRC_LOG,   0x5000, LEASE, DROP_NEW,     EVF_CRITICAL, "log line (lease payload)")
+    X(EV_LOG_NEW,          EV_SRC_LOG,   0x5000, LEASE, DROP_NEW,     EVF_CRITICAL, "log line (lease payload)") \
+    X(EV_LOG_READY,        EV_SRC_LOG,   0x5001, STREAM, REPLACE_LAST, EVF_CRITICAL, "log stream ready (payload in SPSC ring)")

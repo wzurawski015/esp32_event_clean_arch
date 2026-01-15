@@ -7,7 +7,7 @@
 #include "services_timer.h"
 #include "services_i2c.h"
 
-#include "app_log_bus.h"     // log -> EV (lease)
+#include "app_log_bus.h"     // log -> EV (STREAM/READY)
 #include "app_demo_lcd.h"    // aktor LCD
 
 #if CONFIG_INFRA_LOG_CLI
@@ -36,7 +36,7 @@ void app_main(void)
     services_timer_start();
     services_i2c_start(16, 4096, 8);
 
-    // 3) Most log->EV (lease): każda nowa linia logu = EV_LOG_NEW z uchwytem
+    // 3) Most log->EV (STREAM): każda nowa linia logu = EV_LOG_READY, payload w ringu
     app_log_bus_start();
 
     // 4) Aplikacja jako aktor (LCD, w razie potrzeby inne)

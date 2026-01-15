@@ -11,7 +11,6 @@
 
 static const char* TAG = "SVC_UART";
 
-// Struktura zdarzenia z kolejki drivera (musi pasować do IDF uart_event_t)
 typedef struct {
     int type;
     size_t size;
@@ -27,16 +26,15 @@ static void handle_rx_event(uart_evt_t* evt)
 {
     size_t len = 0;
 
-    // 1. Sprawdź ile danych jest dostępnych
     if (uart_port_is_pattern_event(evt->type)) {
         int pos = uart_port_pop_pattern(s_port);
         if (pos != -1) {
-            len = pos + 1; // Czytaj razem ze znakiem końca
+            len = pos + 1;
         }
     } else if (uart_port_is_data_event(evt->type)) {
         len = evt->size;
     } else {
-        if (evt->type != 0) { // Loguj tylko błędy, nie UART_DATA=0
+        if (evt->type != 0) {
             ESP_LOGW(TAG, "UART HW event type: %d", evt->type);
         }
         return;
@@ -44,8 +42,7 @@ static void handle_rx_event(uart_evt_t* evt)
 
     if (len == 0) return;
 
-    // 2. Alokacja slotu (Zero-Copy)
-    lp_handle_t h = lp_alloc_try((uint32_t)len + 1); // +1 na null-terminator
+    lp_handle_t h = lp_alloc_try((uint32_t)len + 1);
     if (!lp_handle_is_valid(h)) {
         ESP_LOGE(TAG, "RX Drop: LeasePool full (%u bytes)", (unsigned)len);
         uint8_t trash[64];
@@ -58,15 +55,16 @@ static void handle_rx_event(uart_evt_t* evt)
         return;
     }
 
-    // 3. Odczyt danych bezpośrednio do slotu
     lp_view_t v;
     if (lp_acquire(h, &v)) {
         int read = uart_port_read(s_port, v.ptr, len, 100);
         if (read > 0) {
-            ((uint8_t*)v.ptr)[read] = 0; // Null-terminate
+            ((uint8_t*)v.ptr)[read] = 0;
             lp_commit(h, read);
-            // 4. Publikacja
-            ev_bus_post_lease(s_bus, EV_UART_FRAME, EV_UART_FRAME, h, read);
+            
+            // --- FIX: Używamy poprawnego EV_SRC_UART zamiast EV_UART_FRAME jako src ---
+            ev_bus_post_lease(s_bus, EV_SRC_UART, EV_UART_FRAME, h, read);
+            
         } else {
             lp_release(h);
         }
@@ -77,7 +75,6 @@ static void handle_rx_event(uart_evt_t* evt)
 
 static void handle_tx_request(ev_msg_t* m)
 {
-    // Otrzymaliśmy żądanie TX z payloadem w Lease
     lp_handle_t h = lp_unpack_handle_u32(m->a0);
     lp_view_t v;
 
@@ -97,7 +94,6 @@ static void uart_worker_task(void* arg)
     QueueHandle_t active_q;
 
     while (1) {
-        // Czekamy na cokolwiek: RX lub TX
         active_q = xQueueSelectFromSet(s_qset, portMAX_DELAY);
 
         if (active_q == uart_port_get_event_queue(s_port)) {

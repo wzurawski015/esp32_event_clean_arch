@@ -3,6 +3,7 @@
 #include "core_ev.h"
 #include "infra_log_stream.h"
 #include "ports/log_port.h"
+#include "ports/wdt_port.h" // <--- NOWOŚĆ
 
 #include "idf_i2c_port.h"                 // i2c_bus_create/probe/add
 #include "services_i2c.h"
@@ -19,9 +20,9 @@
 static const char* TAG = "APP_DEMO_LCD";
 
 // Lokalne zasoby tego aktora
-static i2c_bus_t*   s_bus     = NULL;
-static i2c_dev_t*   s_dev_lcd = NULL;
-static i2c_dev_t*   s_dev_rgb = NULL;
+static i2c_bus_t* s_bus     = NULL;
+static i2c_dev_t* s_dev_lcd = NULL;
+static i2c_dev_t* s_dev_rgb = NULL;
 static TaskHandle_t s_task    = NULL;
 
 static const ev_bus_t* s_evb = NULL;
@@ -115,6 +116,9 @@ static void app_demo_lcd_task(void* arg)
         return;
     }
 
+    // 1. Rejestracja w WDT (Heartbeat Start)
+    wdt_add_self();
+
     // Kick start
     ev_bus_post(s_evb, EV_SRC_SYS, EV_SYS_START, 0, 0);
 
@@ -122,7 +126,15 @@ static void app_demo_lcd_task(void* arg)
     ev_msg_t m;
 
     for (;;) {
-        if (xQueueReceive(q, &m, portMAX_DELAY) != pdTRUE) continue;
+        // 2. Heartbeat Loop: Timeout 1000ms
+        // Jeśli nie ma eventów (np. brak logów), budzimy się tylko dla psa.
+        if (xQueueReceive(q, &m, pdMS_TO_TICKS(1000)) != pdTRUE) {
+            wdt_reset(); // IDLE state
+            continue;
+        }
+
+        // 3. Jest event -> Głaskamy psa
+        wdt_reset();
 
         // 1) Driver zgłosił gotowość LCD → ekran powitalny
         if (m.src == EV_SRC_LCD && m.code == EV_LCD_READY && !first_ready) {
@@ -138,6 +150,8 @@ static void app_demo_lcd_task(void* arg)
         // 2) Reaktywne logi (STREAM): EV_LOG_READY -> payload w ring-bufferze
         if (m.src == EV_SRC_LOG && m.code == EV_LOG_READY) {
             drain_log_stream_to_lcd_();
+            // Przetwarzanie strumienia może trwać (pętla po SPSC), więc resetujemy też po.
+            wdt_reset();
             continue;
         }
 
@@ -157,6 +171,10 @@ static void app_demo_lcd_task(void* arg)
         }
 
     }
+    
+    // Sprzątanie
+    wdt_remove_self();
+    vTaskDelete(NULL);
 }
 
 bool app_demo_lcd_start(const ev_bus_t* bus)
@@ -197,3 +215,4 @@ bool app_demo_lcd_start(const ev_bus_t* bus)
     LOGI(TAG, "started");
     return true;
 }
+

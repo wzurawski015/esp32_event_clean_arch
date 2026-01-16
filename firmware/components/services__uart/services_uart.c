@@ -1,5 +1,6 @@
 #include "services_uart.h"
 #include "ports/uart_port.h"
+#include "ports/wdt_port.h"  // <--- NOWOŚĆ
 #include "core_ev.h"
 #include "core/leasepool.h"
 #include "esp_log.h"
@@ -62,7 +63,7 @@ static void handle_rx_event(uart_evt_t* evt)
             ((uint8_t*)v.ptr)[read] = 0;
             lp_commit(h, read);
             
-            // --- FIX: Używamy poprawnego EV_SRC_UART zamiast EV_UART_FRAME jako src ---
+            // Wysyłamy LEASE z poprawnym źródłem
             ev_bus_post_lease(s_bus, EV_SRC_UART, EV_UART_FRAME, h, read);
             
         } else {
@@ -93,8 +94,22 @@ static void uart_worker_task(void* arg)
     (void)arg;
     QueueHandle_t active_q;
 
+    // 1. Rejestracja w Watchdogu (Sentinel)
+    wdt_add_self();
+
     while (1) {
-        active_q = xQueueSelectFromSet(s_qset, portMAX_DELAY);
+        // 2. Heartbeat Loop: Czekaj max 1000ms.
+        // Jeśli przez sekundę nie ma zdarzeń UART (cisza na linii),
+        // funkcja zwróci NULL, a my zresetujemy Watchdoga.
+        active_q = xQueueSelectFromSet(s_qset, pdMS_TO_TICKS(1000));
+
+        if (active_q == NULL) {
+            wdt_reset(); // IDLE state: "Żyję, tylko nie ma danych"
+            continue;
+        }
+
+        // 3. Przyszło zdarzenie (RX lub TX) -> Resetujemy WDT przed pracą
+        wdt_reset();
 
         if (active_q == uart_port_get_event_queue(s_port)) {
             uart_evt_t evt;
@@ -110,7 +125,14 @@ static void uart_worker_task(void* arg)
                 }
             }
         }
+        
+        // 4. Reset po pracy (dla pewności, przy długich ramkach)
+        wdt_reset();
     }
+    
+    // Sprzątanie (teoretycznie nieosiągalne)
+    wdt_remove_self();
+    vTaskDelete(NULL);
 }
 
 bool services_uart_start(const ev_bus_t* bus, const uart_svc_cfg_t* cfg)
@@ -162,3 +184,4 @@ bool services_uart_start(const ev_bus_t* bus, const uart_svc_cfg_t* cfg)
     ESP_LOGI(TAG, "Service started. Pattern: 0x%02X", cfg->pattern_char);
     return true;
 }
+

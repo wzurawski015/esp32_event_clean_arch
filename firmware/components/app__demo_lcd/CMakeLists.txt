@@ -9,8 +9,10 @@ idf_component_register(
   services__i2c
   drivers__lcd1602rgb_dfr_async
   infrastructure__idf_i2c_port
+  infrastructure__idf_wdt_port  # <--- NOWOŚĆ: Watchdog
   infrastructure__logging
   ports
   PRIV_REQUIRES
   freertos
   console)
+

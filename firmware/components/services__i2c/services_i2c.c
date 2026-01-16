@@ -5,6 +5,7 @@
 
 #include "core_ev.h"
 #include "ports/log_port.h"
+#include "ports/wdt_port.h" // +++ NOWOŚĆ: Interfejs Watchdoga
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
 #include "freertos/task.h"
@@ -14,8 +15,8 @@ static const char* TAG = "I2C_SVC";
 typedef struct req_node
 {
     i2c_req_t r;
-    uint8_t*  tx_copy;  /* właśności usługi */
-    uint8_t*  rx_stage; /* staging dla RX */
+    uint8_t* tx_copy;  /* właśności usługi */
+    uint8_t* rx_stage; /* staging dla RX */
 } req_node_t;
 
 static QueueHandle_t s_q  = NULL;
@@ -25,11 +26,27 @@ static const ev_bus_t* s_bus = NULL;
 static void worker(void* arg)
 {
     (void)arg;
+
+    // 1. Rejestracja w systemie Watchdog (TWDT)
+    // Od teraz musimy resetować WDT częściej niż wynosi timeout (np. 5s)
+    wdt_add_self();
+
     for (;;)
     {
         req_node_t* n = NULL;
-        if (xQueueReceive(s_q, &n, portMAX_DELAY) != pdTRUE || !n)
+
+        // 2. Czekaj na pracę z TIMEOUTEM (Heartbeat)
+        // Zamiast portMAX_DELAY czekamy 1000ms. Jeśli kolejka pusta,
+        // budzimy się tylko po to, by zresetować WDT.
+        if (xQueueReceive(s_q, &n, pdMS_TO_TICKS(1000)) != pdTRUE) {
+            wdt_reset(); // IDLE: Głaskanie psa, gdy brak pracy
             continue;
+        }
+
+        if (!n) continue; // Safety check
+
+        // 3. Reset przed pracą (Task żyje i właśnie wziął zadanie)
+        wdt_reset();
 
         esp_err_t err = ESP_OK;
         switch (n->r.op)
@@ -53,6 +70,9 @@ static void worker(void* arg)
                 break;
         }
 
+        // 4. Reset po pracy (I2C to wolna magistrala, transakcja mogła trwać długo)
+        wdt_reset();
+
         /* Event do systemu */
         if (err == ESP_OK)
         {
@@ -71,6 +91,10 @@ static void worker(void* arg)
             free(n->rx_stage);
         free(n);
     }
+
+    // Sprzątanie po wyjściu z pętli (teoretycznie unreachable, ale poprawnie)
+    wdt_remove_self();
+    vTaskDelete(NULL);
 }
 
 bool services_i2c_start(const ev_bus_t* bus, int queue_len, int task_stack, int task_prio)
@@ -145,3 +169,4 @@ bool services_i2c_submit(const i2c_req_t* req)
     }
     return true;
 }
+

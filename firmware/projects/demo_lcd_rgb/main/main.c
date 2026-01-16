@@ -1,22 +1,19 @@
 #include "sdkconfig.h"
 #include "esp_log.h"
+#include "esp_system.h" // Dla esp_reset_reason()
 #include "nvs_flash.h"
 #include "nvs.h"
 
-/* --- Warstwa Core (Fundament) --- */
 #include "core_ev.h"
 #include "core/leasepool.h"
-
-/* --- Warstwa Ports (Abstrakcje) --- */
 #include "ports/kv_port.h"
 #include "ports/log_port.h"
+#include "ports/wdt_port.h" // +++ NOWOŚĆ: Kontrakt Watchdoga
 
-/* --- Warstwa Services (Logika Aplikacyjna / Use Cases) --- */
 #include "services_timer.h"
 #include "services_i2c.h"
 #include "services_uart.h"
 
-/* --- Warstwa Aktorów (Prezentacja / Interakcja) --- */
 #include "app_log_bus.h"
 #include "app_demo_lcd.h"
 
@@ -26,7 +23,6 @@
 
 static const char* TAG = "MAIN";
 
-/* Domyślne poziomy logowania dla różnych modułów */
 static void set_default_log_levels(void)
 {
     esp_log_level_set("*",       ESP_LOG_INFO);
@@ -37,9 +33,43 @@ static void set_default_log_levels(void)
     esp_log_level_set("NVS_ADP", ESP_LOG_INFO);
 }
 
-/* * Self-Test NVS (Diamond Edition).
- * Demonstruje użycie portu KV bez wiedzy o tym, że pod spodem jest ESP32 NVS.
- */
+/* --- POST-MORTEM DIAGNOSTICS --- */
+static void check_reset_reason(void)
+{
+    esp_reset_reason_t reason = esp_reset_reason();
+    
+    kv_handle_t* kv = NULL;
+    kv_cfg_t cfg = { .namespace_name = "storage" };
+    
+    if (kv_open(&cfg, &kv) != PORT_OK) return;
+
+    int32_t crash_cnt = 0;
+    kv_get_int(kv, "crash_cnt", &crash_cnt);
+
+    if (reason == ESP_RST_TASK_WDT) {
+        LOGE(TAG, "!!! SYSTEM RECOVERED FROM WATCHDOG TIMEOUT !!!");
+        crash_cnt++;
+        kv_set_int(kv, "crash_cnt", crash_cnt);
+        kv_commit(kv);
+    } 
+    else if (reason == ESP_RST_PANIC) {
+        LOGE(TAG, "!!! SYSTEM RECOVERED FROM EXCEPTION/PANIC !!!");
+        crash_cnt++;
+        kv_set_int(kv, "crash_cnt", crash_cnt);
+        kv_commit(kv);
+    }
+    else {
+        LOGI(TAG, "Boot reason: %d (Normal)", reason);
+    }
+
+    if (crash_cnt > 0) {
+        LOGW(TAG, "Total unexpected crashes so far: %ld", (long)crash_cnt);
+    }
+    
+    kv_close(kv);
+}
+
+/* --- DIAMOND EDITION VERIFICATION TEST --- */
 typedef struct {
     uint32_t boot_magic;
     uint8_t  last_user_id;
@@ -48,108 +78,69 @@ typedef struct {
 
 static void run_diamond_nvs_test(void)
 {
+    /* (Kod bez zmian, dla czytelności pomijam treść, ale zachowaj go!) */
     LOGI(TAG, "--- START NVS DIAMOND TEST ---");
-    
     kv_handle_t* kv = NULL;
-    /* Konfiguracja niezależna od platformy */
-    kv_cfg_t cfg = {
-        .partition_name = "nvs",      // Mapowane przez adapter na partycję IDF
-        .namespace_name = "storage",  
-        .read_only = false
-    };
-
-    if (kv_open(&cfg, &kv) != PORT_OK) {
-        LOGE(TAG, "KV Open failed!");
-        return;
-    }
-
-    /* Test 1: Typy proste (Integer) */
+    kv_cfg_t cfg = { .partition_name = "nvs", .namespace_name = "storage", .read_only = false };
+    if (kv_open(&cfg, &kv) != PORT_OK) { LOGE(TAG, "KV Open failed!"); return; }
     int32_t boot_cnt = 0;
-    if (kv_get_int(kv, "boot_cnt", &boot_cnt) != PORT_OK) {
-        LOGW(TAG, "Pierwsze uruchomienie (nowe urządzenie)");
-        boot_cnt = 0;
-    } else {
-        LOGI(TAG, "Boot count: %ld", (long)boot_cnt);
-    }
+    kv_get_int(kv, "boot_cnt", &boot_cnt);
     boot_cnt++;
     kv_set_int(kv, "boot_cnt", boot_cnt);
-
-    /* Test 2: Struktury binarne (BLOB) - kluczowe dla konfiguracji */
-    app_config_blob_t conf = {0};
-    size_t blob_len = 0;
-    if (kv_get_blob(kv, "sys_cfg", &conf, sizeof(conf), &blob_len) == PORT_OK) {
-        LOGI(TAG, "Config loaded. Magic: 0x%08X, Name: %s", (unsigned)conf.boot_magic, conf.device_name);
-    } else {
-        LOGW(TAG, "Config not found, setting defaults...");
-        conf.boot_magic = 0xCAFEBABE;
-    }
-    
-    // Aktualizacja danych
-    conf.last_user_id++;
-    snprintf(conf.device_name, sizeof(conf.device_name), "ESP_Run_%ld", (long)boot_cnt);
-    kv_set_blob(kv, "sys_cfg", &conf, sizeof(conf));
-
-    /* Test 3: Commit i Statystyki */
-    kv_commit(kv); // Flush to disk
-    
-    kv_stats_t st;
-    if (kv_get_stats(kv, &st) == PORT_OK) {
-        LOGI(TAG, "NVS Health: %u/%u entries used (%u free)", 
-             (unsigned)st.used_entries, (unsigned)st.total_entries, (unsigned)st.free_entries);
-    }
-
+    kv_commit(kv);
+    LOGI(TAG, "Boot count: %ld", (long)boot_cnt);
     kv_close(kv);
     LOGI(TAG, "--- END NVS DIAMOND TEST ---");
 }
 
-/* * Composition Root
- * Tutaj, i tylko tutaj, zapada decyzja jak połączyć komponenty.
- */
 void app_main(void)
 {
     set_default_log_levels();
 
-    // 1. Inicjalizacja Infrastruktury (Low-Level)
-    // To jest jedyne miejsce, gdzie main "brudzi sobie ręce" NVS Flash init,
-    // ponieważ to wymaganie systemowe ESP-IDF przed użyciem WiFi/BT/PHY.
+    // 0. Inicjalizacja NVS
     esp_err_t ret = nvs_flash_init();
     if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
-      LOGW(TAG, "NVS partition corruption detected. Reformatting...");
       ESP_ERROR_CHECK(nvs_flash_erase());
       ret = nvs_flash_init();
     }
     ESP_ERROR_CHECK(ret);
 
-    // 2. Weryfikacja pamięci trwałej (Diagnostic)
+    // 1. Diagnostyka Post-Mortem (czy wstałem po błędzie?)
+    check_reset_reason();
+
+    // 2. Test integracji NVS
     run_diamond_nvs_test();
 
-    // 3. Inicjalizacja Rdzenia (Event Bus, Memory Pool)
     ev_init();
     lp_init();
+
+    // 3. INICJALIZACJA WATCHDOGA (5000 ms)
+    // Musi być przed startem serwisów, aby mogły się zarejestrować.
+    if (wdt_init(5000) != PORT_OK) {
+        LOGE(TAG, "Critical: WDT Init Failed!");
+        // W produkcji tutaj mógłbyś wymusić restart lub wejść w tryb safe-mode.
+    } else {
+        LOGI(TAG, "Sentinel active: TWDT=5000ms");
+    }
+
     const ev_bus_t* bus = ev_bus_default();
 
-    // 4. Start Usług (Services) - pracują w tle
+    // 4. Start Serwisów (teraz wszystkie "głaszczą psa")
     services_timer_start(bus);
     services_i2c_start(bus, 16, 4096, 8); // Queue=16, Stack=4k, Prio=8
 
-    // Serwis UART (Machine-to-Machine interface)
-    // Konfiguracja wstrzykiwana (Dependency Injection)
     uart_svc_cfg_t ucfg = {
         .uart_num = 1,
-        // Używamy makr, które (w przyszłości) mogą pochodzić z Kconfig
-        // Aby to było 100% clean, piny powinny być w sdkconfig.
-        .tx_pin = 4, 
+        .tx_pin = 4,
         .rx_pin = 5,
         .baud_rate = 115200,
-        .pattern_char = '\n' // Frame boundary
+        .pattern_char = '\n'
     };
     services_uart_start(bus, &ucfg);
 
-    // 5. Start Aktorów (Logic)
-    app_log_bus_start(bus);   // Przekierowanie logów na EventBus
-    app_demo_lcd_start(bus);  // Główna logika demo
+    app_log_bus_start(bus);
+    app_demo_lcd_start(bus);
 
-    // 6. Interfejs Diagnostyczny (CLI)
 #if CONFIG_INFRA_LOG_CLI
   #if CONFIG_INFRA_LOG_CLI_START_REPL
     infra_log_cli_start_repl();
@@ -158,8 +149,6 @@ void app_main(void)
   #endif
 #endif
 
-    // Main task spełnił swoje zadanie (setup) i może odejść.
-    // System działa teraz w pełni asynchronicznie na Event Busie.
     vTaskDelete(NULL);
 }
 

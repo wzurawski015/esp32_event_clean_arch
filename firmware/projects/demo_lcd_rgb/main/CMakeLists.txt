@@ -7,15 +7,18 @@ idf_component_register(
         ports
         services__timer
         services__i2c
-        services__uart                # +++ NOWOŚĆ: Serwis UART
+        services__uart                # Serwis UART (M2M)
         infrastructure__idf_i2c_port
-        infrastructure__idf_uart_port # +++ NOWOŚĆ: Adapter UART
+        infrastructure__idf_uart_port # Adapter UART
+        infrastructure__idf_nvs_port  # +++ NOWOŚĆ: Adapter NVS (Diamond Edition)
         drivers__lcd1602rgb_dfr_async
         infrastructure__logging
         app__log_bus
         app__demo_lcd
+        nvs_flash                     # +++ NOWOŚĆ: Wymagane do nvs_flash_init() w main
 )
 
 if(CONFIG_INFRA_LOG_CLI)
     target_link_libraries(${COMPONENT_LIB} PRIVATE idf::console)
 endif()
+

@@ -6,14 +6,13 @@
 
 static const char* TAG = "SPI_PORT";
 
-/* Implementacja struktur nieprzezroczystych */
 struct spi_bus {
     spi_host_device_t host;
     bool dma_enabled;
 };
 
 struct spi_dev {
-    spi_device_handle_t hdev; /* Uchwyt IDF */
+    spi_device_handle_t hdev;
     struct spi_bus* bus; 
 };
 
@@ -104,7 +103,9 @@ port_err_t spi_transfer(spi_dev_t* dev, const uint8_t* tx, uint8_t* rx, size_t l
     t.tx_buffer = tx;
     t.rx_buffer = rx;
     
-    esp_err_t err = spi_device_transmit(dev->hdev, &t);
+    // PERF: Polling zamiast interrupt-based transmit.
+    esp_err_t err = spi_device_polling_transmit(dev->hdev, &t);
     
     return (err == ESP_OK) ? PORT_OK : PORT_FAIL;
 }
+

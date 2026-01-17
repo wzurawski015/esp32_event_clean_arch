@@ -1,19 +1,33 @@
+/**
+ * @file main.c
+ * @brief Entry point aplikacji demo_lcd_rgb.
+ *
+ * Integracja wszystkich warstw:
+ * - Ports: UART, I2C, WDT, KV (NVS), Log, LED.
+ * - Services: Timer, I2C Worker, UART Batching, LED Animation.
+ * - App: Log Bus (Zero-Copy), LCD Actor, CLI.
+ */
+
 #include "sdkconfig.h"
 #include "esp_log.h"
 #include "esp_system.h" // Dla esp_reset_reason()
 #include "nvs_flash.h"
 #include "nvs.h"
 
+/* Core & Ports */
 #include "core_ev.h"
 #include "core/leasepool.h"
 #include "ports/kv_port.h"
 #include "ports/log_port.h"
-#include "ports/wdt_port.h" // +++ NOWOŚĆ: Kontrakt Watchdoga
+#include "ports/wdt_port.h"
 
+/* Services */
 #include "services_timer.h"
 #include "services_i2c.h"
 #include "services_uart.h"
+#include "services_led.h"      // <--- INTEGRACJA LED
 
+/* Application Actors */
 #include "app_log_bus.h"
 #include "app_demo_lcd.h"
 
@@ -30,6 +44,7 @@ static void set_default_log_levels(void)
     esp_log_level_set("LOGCLI",  ESP_LOG_INFO);
     esp_log_level_set("DFR_LCD", ESP_LOG_DEBUG);
     esp_log_level_set("SVC_UART", ESP_LOG_INFO);
+    esp_log_level_set("SVC_LED",  ESP_LOG_INFO);
     esp_log_level_set("NVS_ADP", ESP_LOG_INFO);
 }
 
@@ -70,15 +85,8 @@ static void check_reset_reason(void)
 }
 
 /* --- DIAMOND EDITION VERIFICATION TEST --- */
-typedef struct {
-    uint32_t boot_magic;
-    uint8_t  last_user_id;
-    char     device_name[16];
-} app_config_blob_t;
-
 static void run_diamond_nvs_test(void)
 {
-    /* (Kod bez zmian, dla czytelności pomijam treść, ale zachowaj go!) */
     LOGI(TAG, "--- START NVS DIAMOND TEST ---");
     kv_handle_t* kv = NULL;
     kv_cfg_t cfg = { .partition_name = "nvs", .namespace_name = "storage", .read_only = false };
@@ -97,7 +105,7 @@ void app_main(void)
 {
     set_default_log_levels();
 
-    // 0. Inicjalizacja NVS
+    // 0. Inicjalizacja NVS (Pamięć trwała)
     esp_err_t ret = nvs_flash_init();
     if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
       ESP_ERROR_CHECK(nvs_flash_erase());
@@ -105,30 +113,31 @@ void app_main(void)
     }
     ESP_ERROR_CHECK(ret);
 
-    // 1. Diagnostyka Post-Mortem (czy wstałem po błędzie?)
+    // 1. Diagnostyka (Czy wstaliśmy po błędzie?)
     check_reset_reason();
-
-    // 2. Test integracji NVS
     run_diamond_nvs_test();
 
+    // 2. Inicjalizacja Core (Event Bus & Memory Pool)
     ev_init();
     lp_init();
 
-    // 3. INICJALIZACJA WATCHDOGA (5000 ms)
-    // Musi być przed startem serwisów, aby mogły się zarejestrować.
+    // 3. Inicjalizacja Watchdoga (Safety Sentinel)
+    // Timeout 5000ms. Każdy serwis musi się zameldować.
     if (wdt_init(5000) != PORT_OK) {
         LOGE(TAG, "Critical: WDT Init Failed!");
-        // W produkcji tutaj mógłbyś wymusić restart lub wejść w tryb safe-mode.
     } else {
         LOGI(TAG, "Sentinel active: TWDT=5000ms");
     }
 
     const ev_bus_t* bus = ev_bus_default();
 
-    // 4. Start Serwisów (teraz wszystkie "głaszczą psa")
+    // 4. Start Serwisów Infrastrukturalnych
     services_timer_start(bus);
-    services_i2c_start(bus, 16, 4096, 8); // Queue=16, Stack=4k, Prio=8
+    
+    // I2C: DFRobot LCD wymaga ok. 100kHz
+    services_i2c_start(bus, 16, 4096, 8); 
 
+    // UART: Komunikacja zewnętrzna (Smart Batching RX)
     uart_svc_cfg_t ucfg = {
         .uart_num = 1,
         .tx_pin = 4,
@@ -138,9 +147,24 @@ void app_main(void)
     };
     services_uart_start(bus, &ucfg);
 
-    app_log_bus_start(bus);
-    app_demo_lcd_start(bus);
+    // LED RGB: Status systemu (Event-Driven)
+    // GPIO 8 to wbudowana dioda na ESP32-C6-DevKitC-1
+    led_svc_cfg_t led_cfg = {
+        .gpio_num = 8,
+        .max_leds = 1,
+        .led_type = LED_SVC_WS2812
+    };
+    if (services_led_start(bus, &led_cfg)) {
+        LOGI(TAG, "LED Service active (GPIO 8)");
+    } else {
+        LOGE(TAG, "LED Service failed!");
+    }
 
+    // 5. Start Aktorów Aplikacji
+    app_log_bus_start(bus);   // Przekierowanie logów na Event Bus
+    app_demo_lcd_start(bus);  // Wyświetlanie logów na LCD
+
+    // 6. CLI / REPL (Konsola)
 #if CONFIG_INFRA_LOG_CLI
   #if CONFIG_INFRA_LOG_CLI_START_REPL
     infra_log_cli_start_repl();
@@ -149,6 +173,8 @@ void app_main(void)
   #endif
 #endif
 
+    // Zadanie główne kończy pracę, scheduler przejmuje kontrolę.
+    // Dzięki czystej architekturze, main nie pętli się – tylko inicjuje.
     vTaskDelete(NULL);
 }
 

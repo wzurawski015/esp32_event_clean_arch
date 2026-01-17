@@ -19,6 +19,8 @@ idf_component_register(
         nvs_flash
         services__gpio
         infrastructure__idf_gpio_port
+        services__led
+        infrastructure__idf_led_strip
 )
 
 if(CONFIG_INFRA_LOG_CLI)

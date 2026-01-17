@@ -17,6 +17,8 @@ idf_component_register(
         app__log_bus
         app__demo_lcd
         nvs_flash
+        services__gpio
+        infrastructure__idf_gpio_port
 )
 
 if(CONFIG_INFRA_LOG_CLI)

@@ -6,6 +6,7 @@
 #include "core_ev.h"
 #include "esp_log.h"
 #include "esp_timer.h"
+#include "ports/wdt_port.h" // <--- NOWOŚĆ: API Watchdoga
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
 #include "freertos/task.h"
@@ -39,14 +40,10 @@ static int ms_for_res(int bits)
 {
     switch (bits)
     {
-        case 9:
-            return 94;
-        case 10:
-            return 188;
-        case 11:
-            return 375;
-        default:
-            return 750;
+        case 9:  return 94;
+        case 10: return 188;
+        case 11: return 375;
+        default: return 750;
     }
 }
 
@@ -61,16 +58,15 @@ static void process_sm(void);
 static void timer_once_cb(void* arg)
 {
     (void)arg;
-    /* FIX: Używamy wewnętrznego ticka (NONE), a nie READY (LEASE) */
     ev_bus_post(s_bus, EV_SRC_DS18, EV_DS18_DRV_TICK, 0, 0);
 }
+
 static void timer_period_cb(void* arg)
 {
     (void)arg;
     if (s_st == S_IDLE)
     {
         s_st = S_KICK_CONVERT;
-        /* FIX: Używamy wewnętrznego ticka (NONE) */
         ev_bus_post(s_bus, EV_SRC_DS18, EV_DS18_DRV_TICK, 0, 0);
     }
 }
@@ -80,7 +76,7 @@ static void start_once(int ms)
     if (!s_t_once)
     {
         const esp_timer_create_args_t a = {.callback = timer_once_cb, .name = "ds18_once"};
-        esp_err_t                     e = esp_timer_create(&a, &s_t_once);
+        esp_err_t e = esp_timer_create(&a, &s_t_once);
         (void)e;
     }
     esp_timer_stop(s_t_once);
@@ -155,7 +151,7 @@ static void process_sm(void)
                     r->temp_c = temp_c;
                     lp_commit(h, sizeof(ds18_result_t));
                     
-                    /* FIX: Tutaj (i tylko tutaj) wysyłamy LEASE */
+                    /* LEASE: Publikacja wyniku */
                     ev_bus_post_lease(s_bus, EV_SRC_DS18, EV_DS18_READY, h, sizeof(ds18_result_t));
                 }
             }
@@ -177,11 +173,19 @@ static void ds18_task(void* arg)
 {
     (void)arg;
     ev_msg_t m;
+
+    /* 1. Rejestracja w Task Watchdog (TWDT) */
+    wdt_add_self();
+
     for (;;)
     {
-        if (xQueueReceive(s_q, &m, portMAX_DELAY) == pdTRUE)
+        /* 2. Odbiór z timeoutem (Heartbeat 1000ms) */
+        /* Dzięki temu task budzi się min. raz na sekundę, żeby zresetować psa */
+        if (xQueueReceive(s_q, &m, pdMS_TO_TICKS(1000)) == pdTRUE)
         {
-            /* FIX: Reagujemy na wewnętrzny tick, a nie na READY */
+            /* 3. Reset psa po odebraniu zdarzenia (task żyje i przetwarza) */
+            wdt_reset();
+
             if (m.src == EV_SRC_DS18 && m.code == EV_DS18_DRV_TICK)
             {
                 if (s_st == S_WAIT_CONVERT)
@@ -201,7 +205,16 @@ static void ds18_task(void* arg)
                 }
             }
         }
+        else 
+        {
+            /* 4. Reset psa w stanie IDLE (brak zdarzeń) */
+            wdt_reset();
+        }
     }
+
+    /* Sprzątanie (teoretycznie unreachable) */
+    wdt_remove_self();
+    vTaskDelete(NULL);
 }
 
 bool services_ds18_start(const ev_bus_t* bus, const ds18_svc_cfg_t* cfg)
@@ -237,4 +250,6 @@ void services_ds18_stop(void)
 {
     if (s_t_period) esp_timer_stop(s_t_period);
     if (s_t_once) esp_timer_stop(s_t_once);
+    // TODO: Zatrzymanie taska, usunięcie WDT, zwolnienie RMT
 }
+

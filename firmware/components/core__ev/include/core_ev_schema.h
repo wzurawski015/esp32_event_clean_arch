@@ -43,4 +43,8 @@
     \
     /* LED CONTROL */ \
     X(EV_LED_SET_RGB,      EV_SRC_SYS,   0x8000, COPY,  REPLACE_LAST, 0,           "Set LED RGB: a0=packed(0x00BBGGRR)") \
-    X(EV_LED_UPDATED,      EV_SRC_SYS,   0x8001, NONE,  DROP_NEW,     0,           "LED refresh done")
+    X(EV_LED_UPDATED,      EV_SRC_SYS,   0x8001, NONE,  DROP_NEW,     0,           "LED refresh done") \
+    \
+    /* INTERNAL SENSORS */ \
+    X(EV_SYS_TEMP_UPDATE,  EV_SRC_SYS,   0x0020, COPY,  DROP_NEW,     0,           "Internal Temp update: a0=IEEE754_float_as_u32")
+

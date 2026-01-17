@@ -1,0 +1,60 @@
+#pragma once
+#include "ports/errors.h"
+#include <stdint.h>
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+/* Nieprzezroczysty uchwyt do paska LED */
+typedef struct led_strip_dev led_strip_dev_t;
+
+/** Typy diod (przydatne przy inicjalizacji backendu) */
+typedef enum {
+    LED_STRIP_WS2812, // Najpopularniejsze (GRB)
+    LED_STRIP_SK6812  // Z kanałem białym (RGBW)
+} led_type_t;
+
+typedef struct {
+    int        gpio_num;
+    int        max_leds;
+    led_type_t type;
+    bool       use_dma; // Sugestia dla sterownika
+} led_strip_cfg_t;
+
+/**
+ * @brief Inicjalizuje sterownik paska LED.
+ */
+port_err_t led_strip_create(const led_strip_cfg_t* cfg, led_strip_dev_t** out_dev);
+
+/**
+ * @brief Ustawia kolor pojedynczego piksela w buforze RAM.
+ * @note Nie wysyła danych do diod (wymaga refresh).
+ */
+port_err_t led_strip_set_pixel(led_strip_dev_t* dev, int index, uint8_t r, uint8_t g, uint8_t b);
+
+/**
+ * @brief Ustawia kolor RGBW (tylko dla SK6812).
+ */
+port_err_t led_strip_set_pixel_rgbw(led_strip_dev_t* dev, int index, uint8_t r, uint8_t g, uint8_t b, uint8_t w);
+
+/**
+ * @brief Czyści bufor (ustawia wszystko na 0).
+ */
+port_err_t led_strip_clear(led_strip_dev_t* dev);
+
+/**
+ * @brief Fizycznie wysyła dane do diod (RMT TX).
+ * @param timeout_ms Czas oczekiwania na zakończenie transmisji.
+ */
+port_err_t led_strip_refresh(led_strip_dev_t* dev, uint32_t timeout_ms);
+
+/**
+ * @brief Usuwa sterownik i zwalnia zasoby RMT.
+ */
+port_err_t led_strip_delete(led_strip_dev_t* dev);
+
+#ifdef __cplusplus
+}
+#endif
+

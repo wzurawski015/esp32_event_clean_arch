@@ -3,6 +3,7 @@
 #include "driver/rmt_tx.h"
 #include "esp_rom_sys.h"
 #include "esp_check.h"
+#include "esp_pm.h"            // Power Management
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include <string.h>
@@ -13,19 +14,18 @@
 #define OW_SLOT_DUR_US        65
 #define OW_READ_SAMPLE_US     10
 
-/* RMT: 1 tick = 1 us (1 MHz) */
+/* RMT Resolution: 1MHz (1 tick = 1 us) */
 #define RMT_RESOLUTION_HZ     1000000
 
 /*
  * PERFEKCYJNA STRUKTURA SPRZĘTOWA RMT (ESP32-C6)
- * Bezpośrednie mapowanie na rejestry sprzętowe.
  */
 typedef union {
     struct {
-        uint32_t div0   : 15; /*!< Czas trwania 0 */
-        uint32_t level0 : 1;  /*!< Poziom 0 */
-        uint32_t div1   : 15; /*!< Czas trwania 1 */
-        uint32_t level1 : 1;  /*!< Poziom 1 */
+        uint32_t div0   : 15;
+        uint32_t level0 : 1; 
+        uint32_t div1   : 15;
+        uint32_t level1 : 1; 
     };
     uint32_t val;
 } ow_rmt_symbol_t;
@@ -34,11 +34,26 @@ struct onewire_bus {
     gpio_num_t           pin;
     rmt_channel_handle_t tx_chan;
     rmt_encoder_handle_t copy_encoder;
+#if CONFIG_PM_ENABLE
+    esp_pm_lock_handle_t pm_lock; // Blokada zegara
+#endif
 };
 
 /* --- Helpers --- */
 static inline int _read_gpio(onewire_bus_handle_t bus) {
     return gpio_get_level(bus->pin);
+}
+
+static inline void _pm_lock_acquire(onewire_bus_handle_t bus) {
+#if CONFIG_PM_ENABLE
+    if (bus->pm_lock) esp_pm_lock_acquire(bus->pm_lock);
+#endif
+}
+
+static inline void _pm_lock_release(onewire_bus_handle_t bus) {
+#if CONFIG_PM_ENABLE
+    if (bus->pm_lock) esp_pm_lock_release(bus->pm_lock);
+#endif
 }
 
 /* --- API --- */
@@ -51,7 +66,12 @@ port_err_t onewire_bus_create(int gpio_num, onewire_bus_handle_t* out)
     if (!b) return PORT_FAIL;
     b->pin = (gpio_num_t)gpio_num;
 
-    // 1. Konfiguracja kanału RMT TX
+#if CONFIG_PM_ENABLE
+    // Blokada zabraniająca obniżania zegara APB poniżej MAX podczas transmisji
+    esp_pm_lock_create(ESP_PM_APB_FREQ_MAX, 0, "ow_rmt", &b->pm_lock);
+#endif
+
+    // Konfiguracja RMT TX
     rmt_tx_channel_config_t tx_conf = {
         .gpio_num = b->pin,
         .clk_src = RMT_CLK_SRC_DEFAULT,
@@ -66,7 +86,6 @@ port_err_t onewire_bus_create(int gpio_num, onewire_bus_handle_t* out)
         return PORT_FAIL;
     }
 
-    // 2. Enkoder Copy
     rmt_copy_encoder_config_t cpy_conf = {};
     if (rmt_new_copy_encoder(&cpy_conf, &b->copy_encoder) != ESP_OK) {
         rmt_del_channel(b->tx_chan);
@@ -74,17 +93,11 @@ port_err_t onewire_bus_create(int gpio_num, onewire_bus_handle_t* out)
         return PORT_FAIL;
     }
 
-    // 3. Włączenie kanału
     rmt_enable(b->tx_chan);
 
-    // 4. FIX: Manualne wymuszenie Open-Drain i stanu High
-    // Najpierw wymuszamy logiczną jedynkę (żeby w trybie OD tranzystor puścił linię)
+    // Manualne wymuszenie Open-Drain (Critical Fix dla C6)
     gpio_set_level(b->pin, 1);
-    
-    // Potem ustawiamy tryb Open-Drain
     gpio_set_direction(b->pin, GPIO_MODE_INPUT_OUTPUT_OD);
-    
-    // Włączamy Pull-up (wewnętrzny jest słaby, ale lepszy niż nic dla testu bez czujnika)
     gpio_set_pull_mode(b->pin, GPIO_PULLUP_ENABLE);
 
     *out = b;
@@ -101,6 +114,11 @@ void onewire_bus_delete(onewire_bus_handle_t bus)
         if (bus->copy_encoder) {
             rmt_del_encoder(bus->copy_encoder);
         }
+#if CONFIG_PM_ENABLE
+        if (bus->pm_lock) {
+            esp_pm_lock_delete(bus->pm_lock);
+        }
+#endif
         gpio_reset_pin(bus->pin);
         free(bus);
     }
@@ -110,28 +128,23 @@ bool onewire_reset(onewire_bus_handle_t bus)
 {
     if (!bus) return false;
 
-    // 0. BUS CHECK: Sprawdź, czy linia nie jest zwarta do masy PRZED rozpoczęciem.
-    // Jeśli bez czujnika odczytujesz 0, tutaj funkcja zwróci false (i o to chodzi!).
-    if (_read_gpio(bus) == 0) {
-        return false; // Error: Bus stuck low
-    }
+    // Bus Check
+    if (_read_gpio(bus) == 0) return false;
 
-    // 1. Symbol RESET: Low 480us, potem High 1us
+    _pm_lock_acquire(bus);
+
     ow_rmt_symbol_t sym;
     sym.div0 = 480; sym.level0 = 0;
     sym.div1 = 1;   sym.level1 = 1;
 
     rmt_transmit_config_t tx_conf = { .loop_count = 0 };
-    
     ESP_ERROR_CHECK(rmt_transmit(bus->tx_chan, bus->copy_encoder, &sym, sizeof(sym), &tx_conf));
     ESP_ERROR_CHECK(rmt_tx_wait_all_done(bus->tx_chan, -1));
 
-    // 2. Presence Detect Sequence
-    esp_rom_delay_us(OW_PRESENCE_WAIT_US);
-    
-    int presence = !_read_gpio(bus);
+    _pm_lock_release(bus);
 
-    // 3. Recovery
+    esp_rom_delay_us(OW_PRESENCE_WAIT_US);
+    int presence = !_read_gpio(bus);
     esp_rom_delay_us(OW_RESET_DUR_US - OW_PRESENCE_WAIT_US);
 
     return (bool)presence;
@@ -146,19 +159,19 @@ void onewire_write_byte(onewire_bus_handle_t bus, uint8_t v)
 
     for (int i = 0; i < 8; i++) {
         if (v & (1 << i)) {
-            // Write 1: Low 6us, High 64us
             symbols[i].level0 = 0; symbols[i].div0 = 6;
             symbols[i].level1 = 1; symbols[i].div1 = 64;
         } else {
-            // Write 0: Low 60us, High 10us
             symbols[i].level0 = 0; symbols[i].div0 = 60;
             symbols[i].level1 = 1; symbols[i].div1 = 10;
         }
     }
 
+    _pm_lock_acquire(bus);
     rmt_transmit_config_t tx_conf = { .loop_count = 0 };
     ESP_ERROR_CHECK(rmt_transmit(bus->tx_chan, bus->copy_encoder, symbols, sizeof(symbols), &tx_conf));
     ESP_ERROR_CHECK(rmt_tx_wait_all_done(bus->tx_chan, -1));
+    _pm_lock_release(bus);
 }
 
 uint8_t onewire_read_byte(onewire_bus_handle_t bus)
@@ -166,30 +179,25 @@ uint8_t onewire_read_byte(onewire_bus_handle_t bus)
     if (!bus) return 0;
     uint8_t v = 0;
 
-    // Strobe: Low 2us, High 5us
     ow_rmt_symbol_t strobe;
     strobe.level0 = 0; strobe.div0 = 2;
     strobe.level1 = 1; strobe.div1 = 5;
 
     rmt_transmit_config_t tx_conf = { .loop_count = 0 };
 
+    _pm_lock_acquire(bus); // Trzymamy lock przez cały bajt
+
     for (int i = 0; i < 8; i++) {
-        // 1. FIRE (RMT)
         ESP_ERROR_CHECK(rmt_transmit(bus->tx_chan, bus->copy_encoder, &strobe, sizeof(strobe), &tx_conf));
         
-        // 2. WAIT (Manual delay for precision)
         esp_rom_delay_us(OW_READ_SAMPLE_US);
+        if (_read_gpio(bus)) v |= (1 << i);
 
-        // 3. MEASURE
-        if (_read_gpio(bus)) {
-            v |= (1 << i);
-        }
-
-        // 4. CLEANUP & RECOVERY
         ESP_ERROR_CHECK(rmt_tx_wait_all_done(bus->tx_chan, -1));
         esp_rom_delay_us(OW_SLOT_DUR_US - OW_READ_SAMPLE_US - 2);
     }
 
+    _pm_lock_release(bus);
     return v;
 }
 

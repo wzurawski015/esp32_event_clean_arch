@@ -31,6 +31,7 @@ enum {
     EV_SRC_DS18  = 0x05,
     EV_SRC_LOG   = 0x06,
     EV_SRC_UART  = 0x07,
+    EV_SRC_GPIO  = 0x08,
 };
 
 typedef enum {

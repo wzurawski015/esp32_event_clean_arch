@@ -36,4 +36,7 @@
     /* UART (M2M) */ \
     X(EV_UART_FRAME,       EV_SRC_UART,  0x6000, LEASE, DROP_NEW,     0,           "UART RX frame (lease payload)") \
     X(EV_UART_ERROR,       EV_SRC_UART,  0x6001, COPY,  DROP_NEW,     0,           "UART error (a0=err_code)") \
-    X(EV_UART_TX_REQ,      EV_SRC_UART,  0x6002, LEASE, DROP_NEW,     0,           "UART TX request (lease payload)")
+    X(EV_UART_TX_REQ,      EV_SRC_UART,  0x6002, LEASE, DROP_NEW,     0,           "UART TX request (lease payload)") \
+    \
+    /* GPIO */ \
+    X(EV_GPIO_INPUT,       EV_SRC_GPIO,  0x7000, COPY,  DROP_NEW,     0,           "GPIO input changed: a0=pin, a1=val")

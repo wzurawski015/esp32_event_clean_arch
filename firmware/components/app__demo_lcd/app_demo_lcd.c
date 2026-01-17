@@ -3,7 +3,7 @@
 #include "core_ev.h"
 #include "infra_log_stream.h"
 #include "ports/log_port.h"
-#include "ports/wdt_port.h" // <--- NOWOŚĆ
+#include "ports/wdt_port.h"
 
 #include "idf_i2c_port.h"                 // i2c_bus_create/probe/add
 #include "services_i2c.h"
@@ -16,6 +16,7 @@
 #include <string.h>
 #include <stdint.h>
 #include <stdbool.h>
+#include <stdio.h>    // <--- Wymagane do snprintf
 
 static const char* TAG = "APP_DEMO_LCD";
 
@@ -26,6 +27,15 @@ static i2c_dev_t* s_dev_rgb = NULL;
 static TaskHandle_t s_task    = NULL;
 
 static const ev_bus_t* s_evb = NULL;
+
+/* --- Helpers --- */
+
+// Helper do bezpiecznego rzutowania bitowego (type-punning)
+static inline float u32_to_float(uint32_t u) {
+    float f;
+    memcpy(&f, &u, sizeof(f));
+    return f;
+}
 
 static void scan_log_and_pick_addrs(i2c_bus_t* bus, uint8_t* out_lcd, uint8_t* out_rgb)
 {
@@ -116,7 +126,6 @@ static void app_demo_lcd_task(void* arg)
         return;
     }
 
-    // 1. Rejestracja w WDT (Heartbeat Start)
     wdt_add_self();
 
     // Kick start
@@ -126,17 +135,15 @@ static void app_demo_lcd_task(void* arg)
     ev_msg_t m;
 
     for (;;) {
-        // 2. Heartbeat Loop: Timeout 1000ms
-        // Jeśli nie ma eventów (np. brak logów), budzimy się tylko dla psa.
+        // Heartbeat Loop
         if (xQueueReceive(q, &m, pdMS_TO_TICKS(1000)) != pdTRUE) {
             wdt_reset(); // IDLE state
             continue;
         }
 
-        // 3. Jest event -> Głaskamy psa
-        wdt_reset();
+        wdt_reset(); // Active state
 
-        // 1) Driver zgłosił gotowość LCD → ekran powitalny
+        // 1) Driver gotowy
         if (m.src == EV_SRC_LCD && m.code == EV_LCD_READY && !first_ready) {
             lcd_print_line16(0, CONFIG_APP_LCD_TEXT0, strlen(CONFIG_APP_LCD_TEXT0));
             lcd_print_line16(1, CONFIG_APP_LCD_TEXT1, strlen(CONFIG_APP_LCD_TEXT1));
@@ -147,15 +154,28 @@ static void app_demo_lcd_task(void* arg)
             continue;
         }
 
-        // 2) Reaktywne logi (STREAM): EV_LOG_READY -> payload w ring-bufferze
+        // 2) Logi (STREAM) -> Wiersz 1
         if (m.src == EV_SRC_LOG && m.code == EV_LOG_READY) {
             drain_log_stream_to_lcd_();
-            // Przetwarzanie strumienia może trwać (pętla po SPSC), więc resetujemy też po.
             wdt_reset();
             continue;
         }
 
-        // 2b) Legacy: EV_LOG_NEW (LEASE) – zachowane dla kompatybilności
+        // 3) Temperatura (EV_SYS_TEMP_UPDATE) -> Wiersz 0
+        // To jest dodany fragment "Krok 6"
+        if (m.src == EV_SRC_SYS && m.code == EV_SYS_TEMP_UPDATE) {
+            float temp = u32_to_float(m.a0);
+            char buf[17];
+            // Formatowanie: "CPU: 45.2 C" (zajmuje ok. 12 znaków, reszta spacje)
+            snprintf(buf, sizeof(buf), "CPU: %.1f C", temp);
+            
+            // Nadpisujemy Wiersz 0 (zamiast statycznego tekstu powitalnego)
+            lcd_print_line16(0, buf, strlen(buf)); 
+            lcd1602rgb_request_flush();
+            continue;
+        }
+
+        // 4) Logi (Legacy LEASE)
         if (m.src == EV_SRC_LOG && m.code == EV_LOG_NEW) {
             lp_handle_t h = lp_unpack_handle_u32(m.a0);
             lp_view_t   v;
@@ -169,10 +189,8 @@ static void app_demo_lcd_task(void* arg)
             }
             continue;
         }
-
     }
     
-    // Sprzątanie
     wdt_remove_self();
     vTaskDelete(NULL);
 }
@@ -184,7 +202,6 @@ bool app_demo_lcd_start(const ev_bus_t* bus)
     }
     s_evb = bus;
 
-    // Magistrala I²C
     i2c_bus_cfg_t buscfg = {
         .sda_gpio               = CONFIG_APP_I2C_SDA,
         .scl_gpio               = CONFIG_APP_I2C_SCL,
@@ -193,20 +210,17 @@ bool app_demo_lcd_start(const ev_bus_t* bus)
     };
     ESP_ERROR_CHECK(i2c_bus_create(&buscfg, &s_bus));
 
-    // Auto-detekcja adresów + dodanie urządzeń
     uint8_t lcd_addr = 0, rgb_addr = 0;
     scan_log_and_pick_addrs(s_bus, &lcd_addr, &rgb_addr);
     ESP_ERROR_CHECK(i2c_dev_add(s_bus, lcd_addr, &s_dev_lcd));
     ESP_ERROR_CHECK(i2c_dev_add(s_bus, rgb_addr, &s_dev_rgb));
 
-    // Start drivera LCD
     lcd1602rgb_cfg_t lc = { .dev_lcd = s_dev_lcd, .dev_rgb = s_dev_rgb };
     if (!lcd1602rgb_init(&lc)) {
         LOGE(TAG, "LCD init failed");
         return false;
     }
 
-    // Zadanie-aktor z pętlą zdarzeń
     if (xTaskCreate(app_demo_lcd_task, "app_demo_lcd", 4096, NULL, tskIDLE_PRIORITY+2, &s_task) != pdPASS) {
         LOGE(TAG, "create task failed");
         return false;

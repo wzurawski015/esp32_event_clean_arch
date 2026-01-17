@@ -2,9 +2,9 @@
  * @file main.c
  * @brief Entry point aplikacji demo_lcd_rgb.
  *
- * Integracja wszystkich warstw:
- * - Ports: UART, I2C, WDT, KV (NVS), Log, LED.
- * - Services: Timer, I2C Worker, UART Batching, LED Animation.
+ * Integracja wszystkich warstw "Industrial Grade":
+ * - Ports: UART, I2C, WDT, KV (NVS), Log, LED, Internal Temp.
+ * - Services: Timer, I2C Worker, UART Batching, LED Animation, Sys Temp Monitor.
  * - App: Log Bus (Zero-Copy), LCD Actor, CLI.
  */
 
@@ -25,7 +25,8 @@
 #include "services_timer.h"
 #include "services_i2c.h"
 #include "services_uart.h"
-#include "services_led.h"      // <--- INTEGRACJA LED
+#include "services_led.h"
+#include "services_internal_temp.h" // <--- NOWOŚĆ: Czujnik wbudowany
 
 /* Application Actors */
 #include "app_log_bus.h"
@@ -45,6 +46,7 @@ static void set_default_log_levels(void)
     esp_log_level_set("DFR_LCD", ESP_LOG_DEBUG);
     esp_log_level_set("SVC_UART", ESP_LOG_INFO);
     esp_log_level_set("SVC_LED",  ESP_LOG_INFO);
+    esp_log_level_set("SVC_ITEMP",ESP_LOG_INFO); // Logi serwisu temperatury
     esp_log_level_set("NVS_ADP", ESP_LOG_INFO);
 }
 
@@ -105,7 +107,7 @@ void app_main(void)
 {
     set_default_log_levels();
 
-    // 0. Inicjalizacja NVS (Pamięć trwała)
+    // 0. Inicjalizacja NVS
     esp_err_t ret = nvs_flash_init();
     if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
       ESP_ERROR_CHECK(nvs_flash_erase());
@@ -113,16 +115,15 @@ void app_main(void)
     }
     ESP_ERROR_CHECK(ret);
 
-    // 1. Diagnostyka (Czy wstaliśmy po błędzie?)
+    // 1. Diagnostyka
     check_reset_reason();
     run_diamond_nvs_test();
 
-    // 2. Inicjalizacja Core (Event Bus & Memory Pool)
+    // 2. Core Init
     ev_init();
     lp_init();
 
-    // 3. Inicjalizacja Watchdoga (Safety Sentinel)
-    // Timeout 5000ms. Każdy serwis musi się zameldować.
+    // 3. Watchdog Init (5s)
     if (wdt_init(5000) != PORT_OK) {
         LOGE(TAG, "Critical: WDT Init Failed!");
     } else {
@@ -133,38 +134,35 @@ void app_main(void)
 
     // 4. Start Serwisów Infrastrukturalnych
     services_timer_start(bus);
+    services_i2c_start(bus, 16, 4096, 8);
     
-    // I2C: DFRobot LCD wymaga ok. 100kHz
-    services_i2c_start(bus, 16, 4096, 8); 
-
-    // UART: Komunikacja zewnętrzna (Smart Batching RX)
     uart_svc_cfg_t ucfg = {
-        .uart_num = 1,
-        .tx_pin = 4,
-        .rx_pin = 5,
-        .baud_rate = 115200,
-        .pattern_char = '\n'
+        .uart_num = 1, .tx_pin = 4, .rx_pin = 5, .baud_rate = 115200, .pattern_char = '\n'
     };
     services_uart_start(bus, &ucfg);
 
-    // LED RGB: Status systemu (Event-Driven)
-    // GPIO 8 to wbudowana dioda na ESP32-C6-DevKitC-1
-    led_svc_cfg_t led_cfg = {
-        .gpio_num = 8,
-        .max_leds = 1,
-        .led_type = LED_SVC_WS2812
-    };
+    // Serwis LED (GPIO 8)
+    led_svc_cfg_t led_cfg = { .gpio_num = 8, .max_leds = 1, .led_type = LED_SVC_WS2812 };
     if (services_led_start(bus, &led_cfg)) {
         LOGI(TAG, "LED Service active (GPIO 8)");
     } else {
         LOGE(TAG, "LED Service failed!");
     }
 
-    // 5. Start Aktorów Aplikacji
-    app_log_bus_start(bus);   // Przekierowanie logów na Event Bus
-    app_demo_lcd_start(bus);  // Wyświetlanie logów na LCD
+    // --- NOWOŚĆ: Serwis Temperatury Systemowej (CPU) ---
+    // Będzie publikował EV_SYS_TEMP_UPDATE co 1000ms
+    internal_temp_svc_cfg_t temp_cfg = { .period_ms = 1000 };
+    if (services_internal_temp_start(bus, &temp_cfg)) {
+        LOGI(TAG, "Internal Temp Service active (1000ms)");
+    } else {
+        LOGE(TAG, "Internal Temp Service failed!");
+    }
 
-    // 6. CLI / REPL (Konsola)
+    // 5. Start Aktorów Aplikacji (LCD wyświetla logi i temperaturę)
+    app_log_bus_start(bus);
+    app_demo_lcd_start(bus);
+
+    // 6. CLI
 #if CONFIG_INFRA_LOG_CLI
   #if CONFIG_INFRA_LOG_CLI_START_REPL
     infra_log_cli_start_repl();
@@ -173,8 +171,6 @@ void app_main(void)
   #endif
 #endif
 
-    // Zadanie główne kończy pracę, scheduler przejmuje kontrolę.
-    // Dzięki czystej architekturze, main nie pętli się – tylko inicjuje.
     vTaskDelete(NULL);
 }
 

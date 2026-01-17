@@ -21,6 +21,8 @@ idf_component_register(
         infrastructure__idf_gpio_port
         services__led
         infrastructure__idf_led_strip
+        infrastructure__idf_internal_temp
+        services__internal_temp
 )
 
 if(CONFIG_INFRA_LOG_CLI)

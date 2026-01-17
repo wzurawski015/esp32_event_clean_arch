@@ -39,4 +39,8 @@
     X(EV_UART_TX_REQ,      EV_SRC_UART,  0x6002, LEASE, DROP_NEW,     0,           "UART TX request (lease payload)") \
     \
     /* GPIO */ \
-    X(EV_GPIO_INPUT,       EV_SRC_GPIO,  0x7000, COPY,  DROP_NEW,     0,           "GPIO input changed: a0=pin, a1=val")
+    X(EV_GPIO_INPUT,       EV_SRC_GPIO,  0x7000, COPY,  DROP_NEW,     0,           "GPIO input changed: a0=pin, a1=val") \
+    \
+    /* LED CONTROL */ \
+    X(EV_LED_SET_RGB,      EV_SRC_SYS,   0x8000, COPY,  REPLACE_LAST, 0,           "Set LED RGB: a0=packed(0x00BBGGRR)") \
+    X(EV_LED_UPDATED,      EV_SRC_SYS,   0x8001, NONE,  DROP_NEW,     0,           "LED refresh done")

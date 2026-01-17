@@ -14,7 +14,7 @@
 #include "driver/uart.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
-#include "freertos/task.h" // Wymagane dla vTaskList
+#include "freertos/task.h" 
 
 #if CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG
 #include "esp_console_usb_serial_jtag.h"
@@ -39,8 +39,6 @@ static int cmd_tasks(int argc, char** argv)
 {
     (void)argc; (void)argv;
     
-    // Alokujemy duży bufor na stercie, aby nie obciążać stosu command taska
-    // ~40 bajtów na zadanie. 2048B wystarczy na ok. 50 zadań.
     const size_t buf_size = 2048;
     char* buf = (char*)malloc(buf_size);
     if (!buf) {
@@ -48,16 +46,42 @@ static int cmd_tasks(int argc, char** argv)
         return 1;
     }
 
-    // Nagłówek standardowy dla vTaskList
     printf("Task          State   Prio    Stack    Num   Core\n");
     printf("*************************************************\n");
     
-    // FreeRTOS vTaskList wypełnia bufor sformatowanym tekstem
     vTaskList(buf);
     
     printf("%s\n", buf);
     
     free(buf);
+    return 0;
+}
+
+/* ========================= led ========================= */
+static int cmd_led(int argc, char** argv)
+{
+    if (argc < 4) {
+        printf("użycie: led <r> <g> <b>\n");
+        printf("  np: led 255 0 0   (czerwony)\n");
+        printf("      led 0 0 0     (wyłącz)\n");
+        return 0;
+    }
+
+    uint32_t r = strtoul(argv[1], NULL, 10);
+    uint32_t g = strtoul(argv[2], NULL, 10);
+    uint32_t b = strtoul(argv[3], NULL, 10);
+
+    if (r > 255) r = 255;
+    if (g > 255) g = 255;
+    if (b > 255) b = 255;
+
+    /* Format payloadu: 0x00BBGGRR */
+    uint32_t packed = (r & 0xFF) | ((g & 0xFF) << 8) | ((b & 0xFF) << 16);
+
+    /* Wyślij zdarzenie na domyślną szynę */
+    ev_bus_post(ev_bus_default(), EV_SRC_SYS, EV_LED_SET_RGB, packed, 0);
+
+    printf("LED set RGB: %lu %lu %lu (packed=0x%08lX)\n", r, g, b, packed);
     return 0;
 }
 
@@ -537,9 +561,13 @@ esp_err_t infra_log_cli_register(void)
     // NOWOŚĆ: Obserwowalność zadań (FreeRTOS stats)
     const esp_console_cmd_t c_tasks = { .command="tasks", .help="Show FreeRTOS tasks stats", .func=&cmd_tasks };
     esp_console_cmd_register(&c_tasks);
+    
+    // NOWOŚĆ: Sterowanie LED
+    const esp_console_cmd_t c_led = { .command="led", .help="Set LED RGB: led <r> <g> <b>", .func=&cmd_led };
+    esp_console_cmd_register(&c_led);
 
     s_cmds_registered = true;
-    ESP_LOGI(TAG, "CLI commands registered: logrb, loglvl, evstat, lpstat, uart_send, spi_test, tasks");
+    ESP_LOGI(TAG, "CLI commands registered: logrb, loglvl, evstat, lpstat, uart_send, spi_test, tasks, led");
     return ESP_OK;
 }
 

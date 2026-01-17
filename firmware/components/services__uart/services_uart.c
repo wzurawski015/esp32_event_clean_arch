@@ -1,6 +1,6 @@
 #include "services_uart.h"
 #include "ports/uart_port.h"
-#include "ports/wdt_port.h"  // <--- NOWOŚĆ
+#include "ports/wdt_port.h"
 #include "core_ev.h"
 #include "core/leasepool.h"
 #include "esp_log.h"
@@ -25,29 +25,31 @@ static TaskHandle_t s_task = NULL;
 
 static void handle_rx_event(uart_evt_t* evt)
 {
-    size_t len = 0;
-
+    /* SMART BATCHING:
+     * Pytamy sterownik o całkowitą liczbę bajtów w buforze sprzętowym/ringu IDF.
+     * Pobieramy wszystko w jednej transakcji LeasePool.
+     */
+    size_t buffered_len = uart_port_get_buffered_len(s_port);
+    
+    // Obsługa patternu (końca linii) ma priorytet i determinuje długość odczytu
     if (uart_port_is_pattern_event(evt->type)) {
         int pos = uart_port_pop_pattern(s_port);
         if (pos != -1) {
-            len = pos + 1;
+            // Pattern position is relative to the buffered data start
+            buffered_len = pos + 1; 
         }
-    } else if (uart_port_is_data_event(evt->type)) {
-        len = evt->size;
-    } else {
-        if (evt->type != 0) {
-            ESP_LOGW(TAG, "UART HW event type: %d", evt->type);
-        }
-        return;
-    }
+    } 
+    
+    // Jeśli bufor pusty, wychodzimy.
+    if (buffered_len == 0) return;
 
-    if (len == 0) return;
-
-    lp_handle_t h = lp_alloc_try((uint32_t)len + 1);
+    // Alokacja slotu na CAŁĄ dostępną paczkę (+1 na null-terminator)
+    lp_handle_t h = lp_alloc_try((uint32_t)buffered_len + 1);
     if (!lp_handle_is_valid(h)) {
-        ESP_LOGE(TAG, "RX Drop: LeasePool full (%u bytes)", (unsigned)len);
+        ESP_LOGE(TAG, "RX Drop: LeasePool full (%u bytes)", (unsigned)buffered_len);
+        // Opróżnij bufor w nicość, żeby nie zatkać UART
         uint8_t trash[64];
-        size_t to_read = len;
+        size_t to_read = buffered_len;
         while(to_read > 0) {
             int r = uart_port_read(s_port, trash, (to_read > sizeof(trash)) ? sizeof(trash) : to_read, 0);
             if (r <= 0) break;
@@ -56,18 +58,19 @@ static void handle_rx_event(uart_evt_t* evt)
         return;
     }
 
+    // Odczyt danych ("Zero-Copy" do slotu)
     lp_view_t v;
     if (lp_acquire(h, &v)) {
-        int read = uart_port_read(s_port, v.ptr, len, 100);
+        // Czytamy dokładnie tyle, ile namierzyliśmy (timeout 0, bo dane są w RAM)
+        int read = uart_port_read(s_port, v.ptr, buffered_len, 0);
         if (read > 0) {
-            ((uint8_t*)v.ptr)[read] = 0;
+            ((uint8_t*)v.ptr)[read] = 0; // Null-terminator dla wygody
             lp_commit(h, read);
             
             // Wysyłamy LEASE z poprawnym źródłem
             ev_bus_post_lease(s_bus, EV_SRC_UART, EV_UART_FRAME, h, read);
-            
         } else {
-            lp_release(h);
+            lp_release(h); // Błąd odczytu? Zwalniamy slot.
         }
     } else {
         lp_release(h);
@@ -94,21 +97,17 @@ static void uart_worker_task(void* arg)
     (void)arg;
     QueueHandle_t active_q;
 
-    // 1. Rejestracja w Watchdogu (Sentinel)
     wdt_add_self();
 
     while (1) {
-        // 2. Heartbeat Loop: Czekaj max 1000ms.
-        // Jeśli przez sekundę nie ma zdarzeń UART (cisza na linii),
-        // funkcja zwróci NULL, a my zresetujemy Watchdoga.
+        // Heartbeat Loop: Czekaj max 1000ms.
         active_q = xQueueSelectFromSet(s_qset, pdMS_TO_TICKS(1000));
 
         if (active_q == NULL) {
-            wdt_reset(); // IDLE state: "Żyję, tylko nie ma danych"
+            wdt_reset(); 
             continue;
         }
 
-        // 3. Przyszło zdarzenie (RX lub TX) -> Resetujemy WDT przed pracą
         wdt_reset();
 
         if (active_q == uart_port_get_event_queue(s_port)) {
@@ -126,11 +125,9 @@ static void uart_worker_task(void* arg)
             }
         }
         
-        // 4. Reset po pracy (dla pewności, przy długich ramkach)
         wdt_reset();
     }
     
-    // Sprzątanie (teoretycznie nieosiągalne)
     wdt_remove_self();
     vTaskDelete(NULL);
 }
@@ -147,7 +144,7 @@ bool services_uart_start(const ev_bus_t* bus, const uart_svc_cfg_t* cfg)
         .tx_pin = cfg->tx_pin,
         .rx_pin = cfg->rx_pin,
         .baud_rate = cfg->baud_rate,
-        .rx_buf_size = 1024,
+        .rx_buf_size = 2048, // Zwiększony bufor RX dla batchingu
         .tx_buf_size = 1024
     };
 
@@ -183,5 +180,10 @@ bool services_uart_start(const ev_bus_t* bus, const uart_svc_cfg_t* cfg)
 
     ESP_LOGI(TAG, "Service started. Pattern: 0x%02X", cfg->pattern_char);
     return true;
+}
+
+void services_uart_stop(void)
+{
+    // Placeholder - w produkcji można dodać vTaskDelete i czyszczenie
 }
 

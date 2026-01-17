@@ -14,6 +14,8 @@
 #include "driver/uart.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
+#include "freertos/task.h" // Wymagane dla vTaskList
+
 #if CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG
 #include "esp_console_usb_serial_jtag.h"
 #endif
@@ -31,6 +33,33 @@
 #include "core/leasepool.h"
 
 #define TAG "LOGCLI"
+
+/* ========================= tasks ========================= */
+static int cmd_tasks(int argc, char** argv)
+{
+    (void)argc; (void)argv;
+    
+    // Alokujemy duży bufor na stercie, aby nie obciążać stosu command taska
+    // ~40 bajtów na zadanie. 2048B wystarczy na ok. 50 zadań.
+    const size_t buf_size = 2048;
+    char* buf = (char*)malloc(buf_size);
+    if (!buf) {
+        printf("ERR: OOM (needs %u bytes)\n", (unsigned)buf_size);
+        return 1;
+    }
+
+    // Nagłówek standardowy dla vTaskList
+    printf("Task          State   Prio    Stack    Num   Core\n");
+    printf("*************************************************\n");
+    
+    // FreeRTOS vTaskList wypełnia bufor sformatowanym tekstem
+    vTaskList(buf);
+    
+    printf("%s\n", buf);
+    
+    free(buf);
+    return 0;
+}
 
 /* ========================= logrb ========================= */
 
@@ -162,6 +191,7 @@ static const char* ev_src_str_short(ev_src_t src)
         case EV_SRC_DS18:  return "DS18";
         case EV_SRC_LOG:   return "LOG";
         case EV_SRC_UART:  return "UART";
+        case EV_SRC_GPIO:  return "GPIO";
         default:           return "UNK";
     }
 }
@@ -215,6 +245,7 @@ static bool parse_src_(const char* s, ev_src_t* out)
     if (str_ieq_(s, "DS18") || str_ieq_(s, "DS18B20")) { *out = EV_SRC_DS18; return true; }
     if (str_ieq_(s, "LOG"))   { *out = EV_SRC_LOG;   return true; }
     if (str_ieq_(s, "UART"))  { *out = EV_SRC_UART;  return true; }
+    if (str_ieq_(s, "GPIO"))  { *out = EV_SRC_GPIO;  return true; }
     return false;
 }
 
@@ -291,7 +322,6 @@ static void evstat_list_one_(evstat_list_ctx_t* c, const char* name, ev_src_t sr
         printf("--  ----- ------ ------ ------------------------\n");
     }
 
-    /* FIX: Rzutowanie na unsigned dla bezpieczeństwa formatowania */
     printf("%-3u %-5s 0x%04X %-6s %s\n", (unsigned)id, ev_src_str_short(src), (unsigned)code, ev_kind_str_short(kind), name);
     (void)qos; (void)doc; 
     c->shown++;
@@ -302,7 +332,6 @@ static int cmd_evstat_list(int argc, char** argv)
     evstat_list_ctx_t c = {0};
     for (int i = 1; i < argc; ++i) {
         if (!strcmp(argv[i], "--src") && i+1<argc) { parse_src_(argv[++i], &c.f_src); c.have_src=true; }
-        /* FIX: Przywrócona obsługa flagi --kind, aby użyć funkcji parse_kind_ */
         else if (!strcmp(argv[i], "--kind") && i+1<argc) { parse_kind_(argv[++i], &c.f_kind); c.have_kind=true; }
         else if (!strcmp(argv[i], "--doc")) c.show_doc = true;
     }
@@ -351,7 +380,6 @@ static int cmd_evstat_show(int argc, char** argv)
     if (parse_u32_(key, &v) && v < ev_schema_total_()) {
         c.mode = EVSHOW_BY_ID; c.target_id = (unsigned)v;
     } else {
-        /* FIX: Usunięcie nieużywanych zmiennych src/code z logiki uproszczonej */
         c.mode = EVSHOW_BY_NAME; c.target_name = key;
     }
 
@@ -360,7 +388,6 @@ static int cmd_evstat_show(int argc, char** argv)
 #undef X
 
     if (!c.found) { printf("ERR: not found: %s\n", key); return 1; }
-    /* FIX: Rzutowania do (unsigned) dla wszystkich uint32_t */
     printf("EV[%u] %s\n src: %s(0x%04X) code:0x%04X kind:%s\n api: %s\n", 
            (unsigned)c.id, c.name, ev_src_str_short(c.src), (unsigned)c.src, (unsigned)c.code, 
            ev_kind_str_short(c.kind), ev_api_hint_(c.kind, c.qos));
@@ -389,7 +416,6 @@ static int cmd_evstat_stat(int argc, char** argv)
 
     ev_stats_t s;
     ev_get_stats(&s);
-    /* FIX: Rzutowania do (unsigned) dla wszystkich pól statystyk */
     printf("evstat: subs=%u (max=%u) depth_max=%u total_ev=%u\n",
            (unsigned)s.subs_active, (unsigned)s.subs_max, (unsigned)s.q_depth_max, (unsigned)ev_schema_total_());
     printf("  posts_ok=%u posts_drop=%u enq_fail=%u\n",
@@ -427,7 +453,6 @@ static int cmd_lpstat(int argc, char **argv)
     (void)argc; (void)argv;
     lp_stats_t st = {0};
     lp_get_stats(&st);
-    /* FIX: Rzutowania do (unsigned) */
     printf("lp: total=%u free=%u used=%u peak=%u alloc_ok=%u alloc_fail=%u guard_fail=%u\n",
            (unsigned)st.slots_total, (unsigned)st.slots_free,
            (unsigned)st.slots_used, (unsigned)st.slots_peak_used,
@@ -468,7 +493,6 @@ static int cmd_spi_test(int argc, char** argv) {
         printf("SPI already init\n");
         return 0;
     }
-    // FIX: Używamy host_id = 1 (SPI2_HOST)
     spi_bus_cfg_t cfg = {
         .mosi_io = 19, .miso_io = 20, .sclk_io = 21,
         .max_transfer_sz = 128, .enable_dma = true, .host_id = 1
@@ -510,8 +534,12 @@ esp_err_t infra_log_cli_register(void)
     const esp_console_cmd_t c_spi = { .command="spi_test", .help="Init SPI bus to verify driver", .func=&cmd_spi_test };
     esp_console_cmd_register(&c_spi);
 
+    // NOWOŚĆ: Obserwowalność zadań (FreeRTOS stats)
+    const esp_console_cmd_t c_tasks = { .command="tasks", .help="Show FreeRTOS tasks stats", .func=&cmd_tasks };
+    esp_console_cmd_register(&c_tasks);
+
     s_cmds_registered = true;
-    ESP_LOGI(TAG, "CLI commands registered: logrb, loglvl, evstat, lpstat, uart_send, spi_test");
+    ESP_LOGI(TAG, "CLI commands registered: logrb, loglvl, evstat, lpstat, uart_send, spi_test, tasks");
     return ESP_OK;
 }
 
@@ -568,3 +596,4 @@ esp_err_t infra_log_cli_start_repl(void)
 esp_err_t infra_log_cli_register(void)   { return ESP_OK; }
 esp_err_t infra_log_cli_start_repl(void) { return ESP_OK; }
 #endif  // CONFIG_INFRA_LOG_CLI
+

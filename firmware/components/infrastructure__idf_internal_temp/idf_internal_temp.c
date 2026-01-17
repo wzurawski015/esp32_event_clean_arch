@@ -20,12 +20,12 @@ port_err_t internal_temp_create(const internal_temp_cfg_t* cfg, internal_temp_de
     struct internal_temp_dev* d = calloc(1, sizeof(struct internal_temp_dev));
     if (!d) return PORT_FAIL;
 
-    temperature_sensor_config_t conf = TEMPERATURE_SENSOR_CONFIG_DEFAULT(
+    temperature_sensor_config_t tsens_config = TEMPERATURE_SENSOR_CONFIG_DEFAULT(
         cfg ? cfg->min_c : -10,
         cfg ? cfg->max_c : 80
     );
 
-    if (temperature_sensor_install(&conf, &d->handle) != ESP_OK) {
+    if (temperature_sensor_install(&tsens_config, &d->handle) != ESP_OK) {
         free(d);
         return PORT_FAIL;
     }
@@ -37,23 +37,24 @@ port_err_t internal_temp_create(const internal_temp_cfg_t* cfg, internal_temp_de
     }
 
     *out_dev = d;
-    ESP_LOGI(TAG, "Initialized");
+    ESP_LOGI(TAG, "Initialized Internal Temp Sensor");
     return PORT_OK;
 }
 
-port_err_t internal_temp_read(internal_temp_dev_t* dev, float* out)
+port_err_t internal_temp_read(internal_temp_dev_t* dev, float* out_celsius)
 {
-    if (!dev || !out) return PORT_ERR_INVALID_ARG;
-    return map_err(temperature_sensor_get_celsius(dev->handle, out));
+    if (!dev || !out_celsius) return PORT_ERR_INVALID_ARG;
+    return map_err(temperature_sensor_get_celsius(dev->handle, out_celsius));
 }
 
 port_err_t internal_temp_delete(internal_temp_dev_t* dev)
 {
     if (!dev) return PORT_OK;
-    
+
     temperature_sensor_disable(dev->handle);
     temperature_sensor_uninstall(dev->handle);
     free(dev);
-    
+
     return PORT_OK;
 }
+

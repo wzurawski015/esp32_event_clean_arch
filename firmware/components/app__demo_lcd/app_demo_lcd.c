@@ -5,7 +5,7 @@
 #include "ports/log_port.h"
 #include "ports/wdt_port.h"
 
-#include "idf_i2c_port.h"                 // i2c_bus_create/probe/add
+#include "idf_i2c_port.h"
 #include "services_i2c.h"
 #include "lcd1602rgb_dfr_async.h"
 
@@ -16,21 +16,21 @@
 #include <string.h>
 #include <stdint.h>
 #include <stdbool.h>
-#include <stdio.h>    // <--- Wymagane do snprintf
+#include <stdio.h>
 
 static const char* TAG = "APP_DEMO_LCD";
 
-// Lokalne zasoby tego aktora
 static i2c_bus_t* s_bus     = NULL;
 static i2c_dev_t* s_dev_lcd = NULL;
 static i2c_dev_t* s_dev_rgb = NULL;
-static TaskHandle_t s_task    = NULL;
-
+static TaskHandle_t s_task  = NULL;
 static const ev_bus_t* s_evb = NULL;
 
-/* --- Helpers --- */
+/* --- KONFIGURACJA UKŁADU --- */
+#define ROW_LOGS  0   // Logi na górze
+#define ROW_STATS 1   // Temperatura na dole
 
-// Helper do bezpiecznego rzutowania bitowego (type-punning)
+// Type-punning float <-> uint32 (bezpieczny)
 static inline float u32_to_float(uint32_t u) {
     float f;
     memcpy(&f, &u, sizeof(f));
@@ -54,13 +54,11 @@ static void scan_log_and_pick_addrs(i2c_bus_t* bus, uint8_t* out_lcd, uint8_t* o
             }
         }
     }
-
     LOGI("DFR_LCD", "I2C scan end");
     if (!got_lcd) *out_lcd = (uint8_t)CONFIG_APP_LCD_ADDR;
     if (!got_rgb) *out_rgb = (uint8_t)CONFIG_APP_RGB_ADDR;
 }
 
-// Skraca/podkłada spacjami do 16 kolumn (LCD 16x2)
 static void lcd_print_line16(uint8_t row, const char* s, size_t len)
 {
     char tmp[17];
@@ -78,15 +76,12 @@ static inline void tail16_push_(char* buf, size_t* len_io, char c)
         (*len_io)++;
         return;
     }
-
-    // okno przesuwne: utrzymuj ostatnie 16 znaków
     memmove(buf, buf + 1, 15);
     buf[15] = c;
 }
 
 static void drain_log_stream_to_lcd_(void)
 {
-    // Stan przenoszony pomiędzy wywołaniami: linia może być pocięta na fragmenty
     static char   tail[16];
     static size_t tail_len = 0;
 
@@ -98,11 +93,11 @@ static void drain_log_stream_to_lcd_(void)
         for (size_t i = 0; i < n; ++i) {
             const char c = (char)p[i];
             if (c == '\n') {
-                // Wyświetl ogon (ostatnie 16 znaków) tak jak w trybie EV_LOG_NEW
                 char tmp[17];
                 memcpy(tmp, tail, tail_len);
                 tmp[tail_len] = '\0';
-                lcd_print_line16(1, tmp, tail_len);
+                // Wyświetlamy logi w wierszu ROW_LOGS (0)
+                lcd_print_line16(ROW_LOGS, tmp, tail_len);
                 lcd1602rgb_request_flush();
                 tail_len = 0;
                 continue;
@@ -111,7 +106,6 @@ static void drain_log_stream_to_lcd_(void)
             if (c == '\r') continue;
             tail16_push_(tail, &tail_len, c);
         }
-
         infra_log_stream_consume(n);
     }
 }
@@ -127,66 +121,46 @@ static void app_demo_lcd_task(void* arg)
     }
 
     wdt_add_self();
-
-    // Kick start
     ev_bus_post(s_evb, EV_SRC_SYS, EV_SYS_START, 0, 0);
 
     bool first_ready = false;
     ev_msg_t m;
 
     for (;;) {
-        // Heartbeat Loop
         if (xQueueReceive(q, &m, pdMS_TO_TICKS(1000)) != pdTRUE) {
-            wdt_reset(); // IDLE state
+            wdt_reset(); 
             continue;
         }
 
-        wdt_reset(); // Active state
+        wdt_reset();
 
-        // 1) Driver gotowy
+        // 1. LCD Ready -> Ekran powitalny
         if (m.src == EV_SRC_LCD && m.code == EV_LCD_READY && !first_ready) {
-            lcd_print_line16(0, CONFIG_APP_LCD_TEXT0, strlen(CONFIG_APP_LCD_TEXT0));
-            lcd_print_line16(1, CONFIG_APP_LCD_TEXT1, strlen(CONFIG_APP_LCD_TEXT1));
+            lcd_print_line16(0, "System Start...", 15);
+            lcd_print_line16(1, "Waiting data...", 15);
             lcd1602rgb_set_rgb(CONFIG_APP_RGB_R, CONFIG_APP_RGB_G, CONFIG_APP_RGB_B);
             lcd1602rgb_request_flush();
             first_ready = true;
-            LOGI(TAG, "LCD gotowy – wysłano ekran startowy.");
+            LOGI(TAG, "LCD Ready.");
             continue;
         }
 
-        // 2) Logi (STREAM) -> Wiersz 1
+        // 2. Logi -> Wiersz 0
         if (m.src == EV_SRC_LOG && m.code == EV_LOG_READY) {
             drain_log_stream_to_lcd_();
             wdt_reset();
             continue;
         }
 
-        // 3) Temperatura (EV_SYS_TEMP_UPDATE) -> Wiersz 0
-        // To jest dodany fragment "Krok 6"
+        // 3. Temperatura CPU -> Wiersz 1
         if (m.src == EV_SRC_SYS && m.code == EV_SYS_TEMP_UPDATE) {
             float temp = u32_to_float(m.a0);
             char buf[17];
-            // Formatowanie: "CPU: 45.2 C" (zajmuje ok. 12 znaków, reszta spacje)
+            // "CPU: 42.1 C"
             snprintf(buf, sizeof(buf), "CPU: %.1f C", temp);
             
-            // Nadpisujemy Wiersz 0 (zamiast statycznego tekstu powitalnego)
-            lcd_print_line16(0, buf, strlen(buf)); 
+            lcd_print_line16(ROW_STATS, buf, strlen(buf));
             lcd1602rgb_request_flush();
-            continue;
-        }
-
-        // 4) Logi (Legacy LEASE)
-        if (m.src == EV_SRC_LOG && m.code == EV_LOG_NEW) {
-            lp_handle_t h = lp_unpack_handle_u32(m.a0);
-            lp_view_t   v;
-            if (lp_acquire(h, &v)) {
-                const char* p = (const char*)v.ptr;
-                size_t n = v.len;
-                const char* start = (n > 16) ? (p + (n - 16)) : p;
-                lcd_print_line16(1, start, (n > 16) ? 16 : n);
-                lcd1602rgb_request_flush();
-                lp_release(h);
-            }
             continue;
         }
     }
@@ -197,16 +171,14 @@ static void app_demo_lcd_task(void* arg)
 
 bool app_demo_lcd_start(const ev_bus_t* bus)
 {
-    if (!bus || !bus->vtbl) {
-        return false;
-    }
+    if (!bus || !bus->vtbl) return false;
     s_evb = bus;
 
     i2c_bus_cfg_t buscfg = {
-        .sda_gpio               = CONFIG_APP_I2C_SDA,
-        .scl_gpio               = CONFIG_APP_I2C_SCL,
+        .sda_gpio = CONFIG_APP_I2C_SDA,
+        .scl_gpio = CONFIG_APP_I2C_SCL,
         .enable_internal_pullup = CONFIG_APP_I2C_PULLUP,
-        .clk_hz                 = CONFIG_APP_I2C_HZ
+        .clk_hz = CONFIG_APP_I2C_HZ
     };
     ESP_ERROR_CHECK(i2c_bus_create(&buscfg, &s_bus));
 
